@@ -76,8 +76,32 @@ class ToolArgumentsTest {
 
     @Test
     void calendarDayInclusiveBounds_coversLocalDay() {
-        Date[] bounds =
-                ToolArguments.calendarDayInclusiveBounds("2025-06-01", "Asia/Seoul");
+        Date[] bounds = ToolArguments.calendarDayInclusiveBounds("2025-06-01", "Asia/Seoul");
         assertThat(bounds[0].before(bounds[1]) || bounds[0].equals(bounds[1])).isTrue();
+    }
+
+    @Test
+    void optionalIsoDate_returnsNullWhenMissing() {
+        assertThat(ToolArguments.optionalIsoDate(Map.of(), "d")).isNull();
+    }
+
+    @Test
+    void optionalIsoDate_trimsAndParsesOffsetDateTime() {
+        assertThat(ToolArguments.optionalIsoDate(Map.of("d", " 2025-03-26T12:00:00+09:00 "), "d"))
+                .isNotNull();
+    }
+
+    @Test
+    void parseIsoToDate_rejectsInvalidIsoText() {
+        assertThatThrownBy(() -> ToolArguments.parseIsoToDate("not-a-date"))
+                .isInstanceOf(RuntimeException.class);
+    }
+
+    @Test
+    void calendarDayInclusiveBounds_handlesUtcAndDstSensitiveZone() {
+        Date[] utcBounds = ToolArguments.calendarDayInclusiveBounds("2025-01-01", "UTC");
+        Date[] seoulBounds = ToolArguments.calendarDayInclusiveBounds("2025-01-01", "Asia/Seoul");
+        assertThat(utcBounds[0]).isNotEqualTo(seoulBounds[0]);
+        assertThat(utcBounds[1]).isNotEqualTo(seoulBounds[1]);
     }
 }
