@@ -171,7 +171,9 @@ public class McpServerConfiguration {
                         McpSchema.Tool.builder()
                                 .name("get_revision")
                                 .description(
-                                        "Returns metadata and changed paths for a single revision.")
+                                        "Returns metadata and changed paths for a single revision. "
+                                                + "Prefer this (or get_log with a narrow path) before diff_revision on large trees "
+                                                + "so you can scope diffs or use diff_revision output_mode=paths_only.")
                                 .inputSchema(
                                         McpJsonSchemas.object(
                                                 Map.of(
@@ -193,7 +195,10 @@ public class McpServerConfiguration {
                         McpSchema.Tool.builder()
                                 .name("diff_file")
                                 .description(
-                                        "Unified diff of a file between two revisions (SVNKit diff).")
+                                        "Unified diff of a file between two revisions (SVNKit diff). "
+                                                + "Responses are capped by default (total lines / bytes) to avoid MCP token overflow; "
+                                                + "use max_total_lines and line_offset to page. "
+                                                + "When write_spill_file is true and diff_spill_directory is configured, writes the full diff to disk and returns spill_file_path.")
                                 .inputSchema(
                                         McpJsonSchemas.object(
                                                 Map.of(
@@ -211,7 +216,16 @@ public class McpServerConfiguration {
                                                                 "Newer revision (larger number)."),
                                                         "ignore_whitespace",
                                                         McpJsonSchemas.booleanProp(
-                                                                "If true, ignore whitespace in diff.")),
+                                                                "If true, ignore whitespace in diff."),
+                                                        "max_total_lines",
+                                                        McpJsonSchemas.integerProp(
+                                                                "Optional cap on emitted diff lines (server clamps to a safe maximum)."),
+                                                        "line_offset",
+                                                        McpJsonSchemas.integerProp(
+                                                                "Skip this many lines from the capped diff (pagination; combine with truncation.next_line_offset from a prior call)."),
+                                                        "write_spill_file",
+                                                        McpJsonSchemas.booleanProp(
+                                                                "If true, write full diff to diff_spill_directory before truncation and return spill_file_path.")),
                                                 List.of(
                                                         "repository_id",
                                                         "path",
@@ -285,22 +299,55 @@ public class McpServerConfiguration {
                         McpSchema.Tool.builder()
                                 .name("diff_revision")
                                 .description(
-                                        "Unified diff for a single revision (svn diff -c REV) under an optional path prefix.")
+                                        "Unified diff for a single revision (svn diff -c REV) under an optional path prefix. "
+                                                + "For large trees, prefer a narrow path, or use output_mode=paths_only (changed paths only, no body) after scoping with get_revision/get_log. "
+                                                + "Default unified output applies line and file-section caps plus a byte cap (see server defaults). "
+                                                + "Pagination: pass line_offset; read truncation.next_line_offset and truncation.has_more. "
+                                                + "Optional write_spill_file writes the full diff to diff_spill_directory before truncation.")
                                 .inputSchema(
                                         McpJsonSchemas.object(
-                                                Map.of(
-                                                        "repository_id",
-                                                        McpJsonSchemas.stringProp(
-                                                                "Repository id from configuration."),
-                                                        "path",
-                                                        McpJsonSchemas.stringProp(
-                                                                "Optional path prefix under repo root; empty for entire tree."),
-                                                        "revision",
-                                                        McpJsonSchemas.integerProp(
-                                                                "Revision to diff (compared to revision-1)."),
-                                                        "ignore_whitespace",
-                                                        McpJsonSchemas.booleanProp(
-                                                                "If true, ignore whitespace in diff.")),
+                                                Map.ofEntries(
+                                                        Map.entry(
+                                                                "repository_id",
+                                                                McpJsonSchemas.stringProp(
+                                                                        "Repository id from configuration.")),
+                                                        Map.entry(
+                                                                "path",
+                                                                McpJsonSchemas.stringProp(
+                                                                        "Optional path prefix under repo root; empty for entire tree — avoid on large repos unless necessary.")),
+                                                        Map.entry(
+                                                                "revision",
+                                                                McpJsonSchemas.integerProp(
+                                                                        "Revision to diff (compared to revision-1).")),
+                                                        Map.entry(
+                                                                "ignore_whitespace",
+                                                                McpJsonSchemas.booleanProp(
+                                                                        "If true, ignore whitespace in diff.")),
+                                                        Map.entry(
+                                                                "output_mode",
+                                                                McpJsonSchemas.stringEnumProp(
+                                                                        "unified (default) or paths_only (changed paths from revision metadata, no diff body).",
+                                                                        List.of("unified", "paths_only"))),
+                                                        Map.entry(
+                                                                "max_total_lines",
+                                                                McpJsonSchemas.integerProp(
+                                                                        "Optional max lines in unified diff after caps (server clamps).")),
+                                                        Map.entry(
+                                                                "max_lines_per_file",
+                                                                McpJsonSchemas.integerProp(
+                                                                        "Optional max lines per Index (file) section (server clamps).")),
+                                                        Map.entry(
+                                                                "max_files",
+                                                                McpJsonSchemas.integerProp(
+                                                                        "Optional max file sections (Index headers) to include (server clamps).")),
+                                                        Map.entry(
+                                                                "line_offset",
+                                                                McpJsonSchemas.integerProp(
+                                                                        "Skip this many lines from the capped unified diff (pagination).")),
+                                                        Map.entry(
+                                                                "write_spill_file",
+                                                                McpJsonSchemas.booleanProp(
+                                                                        "If true, write full diff to diff_spill_directory before truncation; response may include spill_file_path."))),
                                                 List.of("repository_id", "revision")))
                                 .build(),
                         (exchange, request) ->

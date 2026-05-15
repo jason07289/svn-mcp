@@ -37,3 +37,7 @@ io:
             log_limit_max: 500
             file_content_max_bytes: 2000000
             max_revisions_for_stats: 500
+            diff_max_total_lines: 3500
+            diff_max_lines_per_file: 1000
+            diff_max_files_per_response: 15
+            diff_spill_directory: ""

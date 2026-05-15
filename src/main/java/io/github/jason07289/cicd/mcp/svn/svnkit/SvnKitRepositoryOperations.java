@@ -5,6 +5,8 @@ import io.github.jason07289.cicd.mcp.config.CicdMcpProperties.RepositoryEntry;
 import io.github.jason07289.cicd.mcp.svn.api.*;
 import io.github.jason07289.cicd.mcp.svn.service.RepositoryEntryResolver;
 import java.io.ByteArrayOutputStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.nio.charset.CharacterCodingException;
 import java.nio.charset.CharsetDecoder;
 import java.nio.charset.CodingErrorAction;
@@ -257,14 +259,33 @@ public class SvnKitRepositoryOperations implements SvnRepositoryOperations {
 
     @Override
     public DiffRevisionResult diffRevision(
-            String repositoryId, String path, long revision, boolean ignoreWhitespace)
+            String repositoryId, String path, long revision, DiffRevisionRequest request)
             throws SvnAccessException {
+        if (request == null) {
+            throw new SvnAccessException("request is required");
+        }
         if (revision <= 0) {
             throw new SvnAccessException("revision must be positive");
         }
         RepositoryEntry entry = resolver.require(repositoryId);
         String normalized = normalizePath(path);
         long fromRev = revision - 1;
+        if ("paths_only".equalsIgnoreCase(request.outputMode().trim())) {
+            GetRevisionResult meta = getRevision(repositoryId, revision);
+            return new DiffRevisionResult(
+                    normalized,
+                    revision,
+                    fromRev,
+                    null,
+                    false,
+                    meta.changedPaths(),
+                    null,
+                    null);
+        }
+        if (!"unified".equalsIgnoreCase(request.outputMode().trim())) {
+            throw new SvnAccessException(
+                    "output_mode must be unified or paths_only, got: " + request.outputMode());
+        }
         try (RepositorySession session = open(entry)) {
             SVNURL targetUrl =
                     normalized.isEmpty()
@@ -279,7 +300,7 @@ public class SvnKitRepositoryOperations implements SvnRepositoryOperations {
                     SVNRevision.create(fromRev),
                     SVNRevision.create(revision));
             SVNDiffOptions opts = new SVNDiffOptions();
-            if (ignoreWhitespace) {
+            if (request.ignoreWhitespace()) {
                 opts.setIgnoreAllWhitespace(true);
             }
             diff.setDiffOptions(opts);
@@ -287,12 +308,42 @@ public class SvnKitRepositoryOperations implements SvnRepositoryOperations {
             diff.setOutput(out);
             diff.run();
             factory.dispose();
-            String text = out.toString(StandardCharsets.UTF_8);
-            long max = properties.getDefaults().getFileContentMaxBytes();
-            boolean truncated = text.length() > max;
-            String payload =
-                    truncated ? text.substring(0, (int) max) + "\n... [truncated]\n" : text;
-            return new DiffRevisionResult(normalized, revision, fromRev, payload, truncated);
+            String fullText = out.toString(StandardCharsets.UTF_8);
+
+            String spillPath = null;
+            if (request.writeSpillFile()) {
+                spillPath = writeSpillFileIfConfigured(repositoryId, revision, fullText);
+            }
+
+            if (request.limitPolicy() == DiffRevisionRequest.LimitPolicy.NONE) {
+                return byteCapDiffRevision(normalized, revision, fromRev, fullText, spillPath);
+            }
+
+            CicdMcpProperties.Defaults d = properties.getDefaults();
+            int maxTotal =
+                    clampOptional(
+                            request.maxTotalLines(),
+                            d.getDiffMaxTotalLines(),
+                            1,
+                            Math.max(100, d.getDiffMaxTotalLines() * 4));
+            int maxPerFile =
+                    clampOptional(
+                            request.maxLinesPerFile(),
+                            d.getDiffMaxLinesPerFile(),
+                            1,
+                            Math.max(50, d.getDiffMaxLinesPerFile() * 4));
+            int maxFiles =
+                    clampOptional(
+                            request.maxFiles(),
+                            d.getDiffMaxFilesPerResponse(),
+                            1,
+                            Math.max(5, d.getDiffMaxFilesPerResponse() * 4));
+            int lineOff = Math.max(0, request.lineOffset() != null ? request.lineOffset() : 0);
+
+            UnifiedDiffTruncation.Result tr =
+                    UnifiedDiffTruncation.truncate(fullText, maxTotal, maxPerFile, maxFiles, lineOff);
+            return applyByteCapToDiffRevision(
+                    normalized, revision, fromRev, tr.text(), tr.meta(), spillPath);
         } catch (SVNException e) {
             throw svnAccessFailed("diff_revision", repositoryId, e);
         }
@@ -361,7 +412,11 @@ public class SvnKitRepositoryOperations implements SvnRepositoryOperations {
             long[] addRem;
             try {
                 DiffRevisionResult dr =
-                        diffRevision(repositoryId, pathPrefix, e.revision(), false);
+                        diffRevision(
+                                repositoryId,
+                                pathPrefix,
+                                e.revision(),
+                                DiffRevisionRequest.internalStats(false));
                 addRem = UnifiedDiffLineStats.countAddedRemoved(dr.unifiedDiff());
             } catch (SvnAccessException ex) {
                 log.warn(
@@ -499,13 +554,15 @@ public class SvnKitRepositoryOperations implements SvnRepositoryOperations {
     }
 
     @Override
-    public String diffFile(
+    public DiffFileResult diffFile(
             String repositoryId,
             String path,
             Long fromRevision,
             Long toRevision,
-            boolean ignoreWhitespace)
+            boolean ignoreWhitespace,
+            DiffFileRequest limits)
             throws SvnAccessException {
+        DiffFileRequest req = limits != null ? limits : DiffFileRequest.defaults();
         RepositoryEntry entry = resolver.require(repositoryId);
         String normalized = normalizePath(path);
         if (fromRevision == null || toRevision == null) {
@@ -530,15 +587,103 @@ public class SvnKitRepositoryOperations implements SvnRepositoryOperations {
             diff.setOutput(out);
             diff.run();
             factory.dispose();
-            String text = out.toString(StandardCharsets.UTF_8);
-            long max = properties.getDefaults().getFileContentMaxBytes();
-            if (text.length() > max) {
-                return text.substring(0, (int) max) + "\n... [truncated]\n";
+            String fullText = out.toString(StandardCharsets.UTF_8);
+
+            String spillPath = null;
+            if (req.writeSpillFile()) {
+                spillPath =
+                        writeSpillFileIfConfigured(
+                                repositoryId + "-file-" + fromRevision + "-" + toRevision,
+                                fullText);
             }
-            return text;
+
+            CicdMcpProperties.Defaults d = properties.getDefaults();
+            int maxTotal =
+                    clampOptional(
+                            req.maxTotalLines(), d.getDiffMaxTotalLines(), 1, d.getDiffMaxTotalLines() * 4);
+            int maxPerFile =
+                    clampOptional(
+                            null,
+                            d.getDiffMaxLinesPerFile(),
+                            1,
+                            Math.max(50, d.getDiffMaxLinesPerFile() * 4));
+            int maxFiles =
+                    clampOptional(
+                            null,
+                            d.getDiffMaxFilesPerResponse(),
+                            1,
+                            Math.max(5, d.getDiffMaxFilesPerResponse() * 4));
+            int lineOff = Math.max(0, req.lineOffset() != null ? req.lineOffset() : 0);
+
+            UnifiedDiffTruncation.Result tr =
+                    UnifiedDiffTruncation.truncate(fullText, maxTotal, maxPerFile, maxFiles, lineOff);
+            return applyByteCapToDiffFile(tr.text(), tr.meta(), spillPath);
         } catch (SVNException e) {
             throw svnAccessFailed("diff_file", repositoryId, e);
         }
+    }
+
+    private DiffRevisionResult byteCapDiffRevision(
+            String path, long revision, long fromRev, String text, String spillPath) {
+        long max = properties.getDefaults().getFileContentMaxBytes();
+        boolean truncated = text.length() > max;
+        String payload = truncated ? text.substring(0, (int) max) + "\n... [truncated]\n" : text;
+        return new DiffRevisionResult(path, revision, fromRev, payload, truncated, null, spillPath, null);
+    }
+
+    private DiffRevisionResult applyByteCapToDiffRevision(
+            String path,
+            long revision,
+            long fromRev,
+            String text,
+            DiffRevisionTruncation lineMeta,
+            String spillPath) {
+        long max = properties.getDefaults().getFileContentMaxBytes();
+        boolean byteTrunc = text.length() > max;
+        String payload =
+                byteTrunc ? text.substring(0, (int) max) + "\n... [truncated by bytes]\n" : text;
+        boolean truncated = byteTrunc || lineMeta.lineTruncated();
+        return new DiffRevisionResult(
+                path, revision, fromRev, payload, truncated, null, spillPath, lineMeta);
+    }
+
+    private DiffFileResult applyByteCapToDiffFile(
+            String text, DiffRevisionTruncation lineMeta, String spillPath) {
+        long max = properties.getDefaults().getFileContentMaxBytes();
+        boolean byteTrunc = text.length() > max;
+        String payload =
+                byteTrunc ? text.substring(0, (int) max) + "\n... [truncated by bytes]\n" : text;
+        boolean truncated = byteTrunc || lineMeta.lineTruncated();
+        return new DiffFileResult(payload, truncated, spillPath, lineMeta);
+    }
+
+    private String writeSpillFileIfConfigured(String repositoryId, long revision, String fullText) {
+        return writeSpillFileIfConfigured(repositoryId + "-r" + revision, fullText);
+    }
+
+    private String writeSpillFileIfConfigured(String nameKey, String fullText) {
+        String dir = properties.getDefaults().getDiffSpillDirectory();
+        if (dir == null || dir.isBlank()) {
+            if (fullText != null && !fullText.isEmpty()) {
+                log.warn("write_spill_file requested but diff_spill_directory is not set; skipping spill");
+            }
+            return null;
+        }
+        try {
+            Path d = Path.of(dir);
+            Files.createDirectories(d);
+            Path f = d.resolve("cicd-mcp-diff-" + nameKey + "-" + System.nanoTime() + ".diff");
+            Files.writeString(f, fullText, StandardCharsets.UTF_8);
+            return f.toAbsolutePath().toString();
+        } catch (Exception e) {
+            log.warn("Failed to write diff spill file: {}", e.getMessage());
+            return null;
+        }
+    }
+
+    private static int clampOptional(Integer value, int def, int min, int max) {
+        int v = value != null && value > 0 ? value : def;
+        return Math.min(max, Math.max(min, v));
     }
 
     @Override

@@ -34,12 +34,13 @@ public interface SvnRepositoryOperations {
 
     GetRevisionResult getRevision(String repositoryId, long revision) throws SvnAccessException;
 
-    String diffFile(
+    DiffFileResult diffFile(
             String repositoryId,
             String path,
             Long fromRevision,
             Long toRevision,
-            boolean ignoreWhitespace)
+            boolean ignoreWhitespace,
+            DiffFileRequest limits)
             throws SvnAccessException;
 
     List<BlameLine> blameFile(String repositoryId, String path, Long revision)
@@ -54,10 +55,7 @@ public interface SvnRepositoryOperations {
 
     /** Unified diff for one revision (equivalent to {@code svn diff -c REV}) under path prefix. */
     DiffRevisionResult diffRevision(
-            String repositoryId,
-            String path,
-            long revision,
-            boolean ignoreWhitespace)
+            String repositoryId, String path, long revision, DiffRevisionRequest request)
             throws SvnAccessException;
 
     /** Aggregates per-author commit counts and diff line stats for a time window. */

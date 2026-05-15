@@ -2,6 +2,9 @@ package io.github.jason07289.cicd.mcp.tool;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.github.jason07289.cicd.mcp.svn.api.DiffFileRequest;
+import io.github.jason07289.cicd.mcp.svn.api.DiffFileResult;
+import io.github.jason07289.cicd.mcp.svn.api.DiffRevisionRequest;
 import io.github.jason07289.cicd.mcp.svn.api.RepositoryCatalog;
 import io.github.jason07289.cicd.mcp.svn.api.SvnAccessException;
 import io.github.jason07289.cicd.mcp.svn.api.SvnRepositoryOperations;
@@ -134,16 +137,21 @@ public class SvnMcpTools {
             Long from = ToolArguments.optionalLong(args, "from_revision");
             Long to = ToolArguments.optionalLong(args, "to_revision");
             Boolean ignoreWs = ToolArguments.optionalBoolean(args, "ignore_whitespace");
-            String diff =
+            DiffFileRequest limits =
+                    new DiffFileRequest(
+                            ToolArguments.optionalInt(args, "max_total_lines"),
+                            ToolArguments.optionalInt(args, "line_offset"),
+                            Boolean.TRUE.equals(
+                                    ToolArguments.optionalBoolean(args, "write_spill_file")));
+            DiffFileResult diff =
                     svn.diffFile(
                             repoId,
                             path,
                             from,
                             to,
-                            ignoreWs != null && ignoreWs);
-            Map<String, Object> body = new LinkedHashMap<>();
-            body.put("unified_diff", diff);
-            return jsonOk(body);
+                            ignoreWs != null && ignoreWs,
+                            limits);
+            return jsonOk(diff);
         } catch (IllegalArgumentException e) {
             return textError(e.getMessage());
         } catch (SvnAccessException e) {
@@ -181,9 +189,18 @@ public class SvnMcpTools {
             String path = ToolArguments.optionalString(args, "path", "");
             long revision = ToolArguments.requireLong(args, "revision");
             Boolean ignoreWs = ToolArguments.optionalBoolean(args, "ignore_whitespace");
-            return jsonOk(
-                    svn.diffRevision(
-                            repoId, path, revision, ignoreWs != null && ignoreWs));
+            DiffRevisionRequest request =
+                    new DiffRevisionRequest(
+                            ignoreWs != null && ignoreWs,
+                            ToolArguments.optionalString(args, "output_mode", "unified"),
+                            DiffRevisionRequest.LimitPolicy.MCP_DEFAULT,
+                            ToolArguments.optionalInt(args, "max_total_lines"),
+                            ToolArguments.optionalInt(args, "max_lines_per_file"),
+                            ToolArguments.optionalInt(args, "max_files"),
+                            ToolArguments.optionalInt(args, "line_offset"),
+                            Boolean.TRUE.equals(
+                                    ToolArguments.optionalBoolean(args, "write_spill_file")));
+            return jsonOk(svn.diffRevision(repoId, path, revision, request));
         } catch (IllegalArgumentException e) {
             return textError(e.getMessage());
         } catch (SvnAccessException e) {

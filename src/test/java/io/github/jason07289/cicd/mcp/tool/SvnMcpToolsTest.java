@@ -185,8 +185,9 @@ class SvnMcpToolsTest {
 
     @Test
     void diffFile_success_wrapsUnifiedDiff() throws Exception {
-        when(svn.diffFile(eq("r1"), eq("p"), eq(1L), eq(2L), eq(true)))
-                .thenReturn("diff output");
+        when(svn.diffFile(
+                        eq("r1"), eq("p"), eq(1L), eq(2L), eq(true), eq(DiffFileRequest.defaults())))
+                .thenReturn(DiffFileResult.legacy("diff output", false));
 
         McpSchema.CallToolResult result =
                 tools.diffFile(
@@ -200,7 +201,7 @@ class SvnMcpToolsTest {
         assertThat(result.isError()).isFalse();
         String json = ((McpSchema.TextContent) result.content().get(0)).text();
         assertThat(json).contains("unified_diff").contains("diff output");
-        verify(svn).diffFile("r1", "p", 1L, 2L, true);
+        verify(svn).diffFile("r1", "p", 1L, 2L, true, DiffFileRequest.defaults());
     }
 
     @Test

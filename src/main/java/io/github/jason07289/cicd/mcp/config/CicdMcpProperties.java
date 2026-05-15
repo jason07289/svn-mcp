@@ -143,6 +143,17 @@ public class CicdMcpProperties {
         private long fileContentMaxBytes = 2_000_000L;
         /** Max revisions to run diff stats on in repository_author_stats. */
         private int maxRevisionsForStats = 500;
+        /** Max unified-diff lines returned per diff_revision / diff_file (after line truncation). */
+        private int diffMaxTotalLines = 3500;
+        /** Max lines kept per Index section in unified diff responses. */
+        private int diffMaxLinesPerFile = 1000;
+        /** Max number of Index (file) sections in one diff response. */
+        private int diffMaxFilesPerResponse = 15;
+        /**
+         * When set and the client requests write_spill_file, full diff text is written here before line
+         * truncation; response includes spill_file_path.
+         */
+        private String diffSpillDirectory = "";
 
         public int getLogLimitMax() {
             return logLimitMax;
@@ -166,6 +177,38 @@ public class CicdMcpProperties {
 
         public void setMaxRevisionsForStats(int maxRevisionsForStats) {
             this.maxRevisionsForStats = maxRevisionsForStats;
+        }
+
+        public int getDiffMaxTotalLines() {
+            return diffMaxTotalLines;
+        }
+
+        public void setDiffMaxTotalLines(int diffMaxTotalLines) {
+            this.diffMaxTotalLines = diffMaxTotalLines;
+        }
+
+        public int getDiffMaxLinesPerFile() {
+            return diffMaxLinesPerFile;
+        }
+
+        public void setDiffMaxLinesPerFile(int diffMaxLinesPerFile) {
+            this.diffMaxLinesPerFile = diffMaxLinesPerFile;
+        }
+
+        public int getDiffMaxFilesPerResponse() {
+            return diffMaxFilesPerResponse;
+        }
+
+        public void setDiffMaxFilesPerResponse(int diffMaxFilesPerResponse) {
+            this.diffMaxFilesPerResponse = diffMaxFilesPerResponse;
+        }
+
+        public String getDiffSpillDirectory() {
+            return diffSpillDirectory;
+        }
+
+        public void setDiffSpillDirectory(String diffSpillDirectory) {
+            this.diffSpillDirectory = diffSpillDirectory != null ? diffSpillDirectory : "";
         }
     }
 }

@@ -84,9 +84,9 @@ class SvnKitRepositoryOperationsTest {
                 LocalSvnRepositorySupport.createTwoRevisionReadmeRepo(tempDir);
         SvnKitRepositoryOperations ops = operations(fx);
 
-        String diff = ops.diffFile("local", "readme.txt", 1L, 2L, false);
+        DiffFileResult diff = ops.diffFile("local", "readme.txt", 1L, 2L, false, DiffFileRequest.defaults());
 
-        assertThat(diff).isNotBlank();
+        assertThat(diff.unifiedDiff()).isNotBlank();
     }
 
     @Test
@@ -95,11 +95,13 @@ class SvnKitRepositoryOperationsTest {
                 LocalSvnRepositorySupport.createTwoRevisionReadmeRepo(tempDir);
         SvnKitRepositoryOperations ops = operations(fx);
 
-        String strict = ops.diffFile("local", "readme.txt", 1L, 2L, false);
-        String ignore = ops.diffFile("local", "readme.txt", 1L, 2L, true);
+        DiffFileResult strict =
+                ops.diffFile("local", "readme.txt", 1L, 2L, false, DiffFileRequest.defaults());
+        DiffFileResult ignore =
+                ops.diffFile("local", "readme.txt", 1L, 2L, true, DiffFileRequest.defaults());
 
-        assertThat(strict).isNotBlank();
-        assertThat(ignore).isNotBlank();
+        assertThat(strict.unifiedDiff()).isNotBlank();
+        assertThat(ignore.unifiedDiff()).isNotBlank();
     }
 
     @Test
@@ -108,10 +110,36 @@ class SvnKitRepositoryOperationsTest {
                 LocalSvnRepositorySupport.createTwoRevisionReadmeRepo(tempDir);
         SvnKitRepositoryOperations ops = operations(fx);
 
-        DiffRevisionResult dr = ops.diffRevision("local", "", 2L, false);
+        DiffRevisionResult dr =
+                ops.diffRevision("local", "", 2L, DiffRevisionRequest.legacy(false));
         assertThat(dr.unifiedDiff()).isNotBlank();
         assertThat(dr.fromRevision()).isEqualTo(1L);
         assertThat(dr.revision()).isEqualTo(2L);
+    }
+
+    @Test
+    void diffRevision_pathsOnly_returnsChangedPathsWithoutUnifiedBody() throws Exception {
+        LocalSvnRepositorySupport.Fixture fx =
+                LocalSvnRepositorySupport.createTwoRevisionReadmeRepo(tempDir);
+        SvnKitRepositoryOperations ops = operations(fx);
+
+        DiffRevisionResult dr =
+                ops.diffRevision(
+                        "local",
+                        "",
+                        2L,
+                        new DiffRevisionRequest(
+                                false,
+                                "paths_only",
+                                DiffRevisionRequest.LimitPolicy.MCP_DEFAULT,
+                                null,
+                                null,
+                                null,
+                                null,
+                                false));
+
+        assertThat(dr.unifiedDiff()).isNull();
+        assertThat(dr.changedPaths()).isNotEmpty();
     }
 
     @Test
