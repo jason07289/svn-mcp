@@ -14,7 +14,7 @@ public final class UnifiedDiffTruncation {
     /**
      * Include at most {@code maxFiles} file sections (lines starting with {@code Index: }), each capped
      * at {@code maxLinesPerFile} lines, and total emitted lines capped at {@code maxTotalLines}. Then skip
-     * the first {@code lineOffset} lines of that assembly (pagination).
+     * the first {@code lineOffset} lines of that assembly (pagination). No per-line character cap.
      */
     public static Result truncate(
             String fullUnifiedDiff,
@@ -22,6 +22,21 @@ public final class UnifiedDiffTruncation {
             int maxLinesPerFile,
             int maxFiles,
             int lineOffset) {
+        return truncate(
+                fullUnifiedDiff, maxTotalLines, maxLinesPerFile, maxFiles, lineOffset, Integer.MAX_VALUE);
+    }
+
+    /**
+     * Same as {@link #truncate(String, int, int, int, int)} but caps each line to {@code maxCharsPerLine}
+     * UTF-16 code units (with an ellipsis marker) so single-line blobs cannot bypass line-count limits.
+     */
+    public static Result truncate(
+            String fullUnifiedDiff,
+            int maxTotalLines,
+            int maxLinesPerFile,
+            int maxFiles,
+            int lineOffset,
+            int maxCharsPerLine) {
         if (fullUnifiedDiff == null || fullUnifiedDiff.isEmpty()) {
             int off = Math.max(0, lineOffset);
             return new Result(
@@ -34,6 +49,9 @@ public final class UnifiedDiffTruncation {
                             0,
                             off,
                             off,
+                            false,
+                            false,
+                            0,
                             false));
         }
         String normalized = fullUnifiedDiff.endsWith("\n") ? fullUnifiedDiff : fullUnifiedDiff + "\n";
@@ -45,6 +63,8 @@ public final class UnifiedDiffTruncation {
         List<String> cappedLines = new ArrayList<>();
         int fileSectionsStarted = 0;
         boolean lineTruncated = false;
+        boolean lineCharsTruncated = false;
+        int linesCharCapped = 0;
 
         outer:
         for (Section sec : sections) {
@@ -65,7 +85,12 @@ public final class UnifiedDiffTruncation {
                     lineTruncated = true;
                     break outer;
                 }
-                cappedLines.add(line);
+                String cappedLine = ellipsizeLineIfNeeded(line, maxCharsPerLine);
+                if (!cappedLine.equals(line)) {
+                    lineCharsTruncated = true;
+                    linesCharCapped++;
+                }
+                cappedLines.add(cappedLine);
                 linesFromThisSection++;
             }
         }
@@ -103,7 +128,18 @@ public final class UnifiedDiffTruncation {
                         fileSectionsOmitted,
                         lineOffsetApplied,
                         nextLineOffset,
-                        hasMoreLines));
+                        hasMoreLines,
+                        lineCharsTruncated,
+                        linesCharCapped,
+                        false));
+    }
+
+    private static String ellipsizeLineIfNeeded(String line, int maxCharsPerLine) {
+        if (maxCharsPerLine <= 0 || line.length() <= maxCharsPerLine) {
+            return line;
+        }
+        int dropped = line.length() - maxCharsPerLine;
+        return line.substring(0, maxCharsPerLine) + "… [line truncated " + dropped + " chars]";
     }
 
     private static int countFileSections(List<Section> sections) {

@@ -3,6 +3,8 @@ package io.github.jason07289.cicd.mcp.svn.svnkit;
 import io.github.jason07289.cicd.mcp.config.CicdMcpProperties;
 import io.github.jason07289.cicd.mcp.config.CicdMcpProperties.RepositoryEntry;
 import io.github.jason07289.cicd.mcp.svn.api.*;
+import io.github.jason07289.cicd.mcp.svn.api.SearchInPathResult;
+import io.github.jason07289.cicd.mcp.svn.api.SearchMatch;
 import io.github.jason07289.cicd.mcp.svn.service.RepositoryEntryResolver;
 import java.io.ByteArrayOutputStream;
 import java.nio.file.Files;
@@ -339,11 +341,24 @@ public class SvnKitRepositoryOperations implements SvnRepositoryOperations {
                             1,
                             Math.max(5, d.getDiffMaxFilesPerResponse() * 4));
             int lineOff = Math.max(0, request.lineOffset() != null ? request.lineOffset() : 0);
+            int maxChars =
+                    clampOptional(
+                            request.maxCharsPerLine(),
+                            d.getDiffMaxCharsPerLine(),
+                            1,
+                            Math.max(100, d.getDiffMaxCharsPerLine() * 4));
+            long maxRespBytes =
+                    clampLongOptional(
+                            request.maxResponseBytes(),
+                            d.getDiffMaxResponseBytes(),
+                            1L,
+                            Math.max(1024L, d.getDiffMaxResponseBytes() * 4L));
 
             UnifiedDiffTruncation.Result tr =
-                    UnifiedDiffTruncation.truncate(fullText, maxTotal, maxPerFile, maxFiles, lineOff);
+                    UnifiedDiffTruncation.truncate(
+                            fullText, maxTotal, maxPerFile, maxFiles, lineOff, maxChars);
             return applyByteCapToDiffRevision(
-                    normalized, revision, fromRev, tr.text(), tr.meta(), spillPath);
+                    normalized, revision, fromRev, tr.text(), tr.meta(), spillPath, maxRespBytes);
         } catch (SVNException e) {
             throw svnAccessFailed("diff_revision", repositoryId, e);
         }
@@ -482,6 +497,138 @@ public class SvnKitRepositoryOperations implements SvnRepositoryOperations {
                 rankings);
     }
 
+    @Override
+    public SearchInPathResult searchInPath(
+            String repositoryId,
+            String path,
+            String keyword,
+            Long revision,
+            java.util.List<String> fileExtensions,
+            boolean caseSensitive,
+            int maxFilesToScan,
+            int maxMatches)
+            throws SvnAccessException {
+        RepositoryEntry entry = resolver.require(repositoryId);
+        String normalized = normalizePath(path);
+        String searchKeyword = caseSensitive ? keyword : keyword.toLowerCase();
+        java.util.Set<String> exts =
+                (fileExtensions == null || fileExtensions.isEmpty())
+                        ? java.util.Set.of("java")
+                        : fileExtensions.stream()
+                                .map(s -> s.toLowerCase().replaceFirst("^\\.", ""))
+                                .collect(java.util.stream.Collectors.toSet());
+
+        try (RepositorySession session = open(entry)) {
+            SVNRepository repo = session.repository();
+            long rev = resolveRevision(repo, revision);
+
+            List<PathEntry> allFiles =
+                    listFlat(repo, normalized, rev, DEFAULT_FLAT_MAX_DEPTH, maxFilesToScan * 2);
+
+            List<PathEntry> candidates =
+                    allFiles.stream()
+                            .filter(
+                                    f -> {
+                                        String name = f.name().toLowerCase();
+                                        int dot = name.lastIndexOf('.');
+                                        if (dot < 0) return false;
+                                        return exts.contains(name.substring(dot + 1));
+                                    })
+                            .collect(java.util.stream.Collectors.toList());
+
+            int filesScanned = 0;
+            boolean scanLimitReached = false;
+            List<SearchMatch> matches = new ArrayList<>();
+
+            for (PathEntry file : candidates) {
+                if (filesScanned >= maxFilesToScan) {
+                    scanLimitReached = true;
+                    break;
+                }
+                if (matches.size() >= maxMatches) {
+                    break;
+                }
+                filesScanned++;
+
+                try {
+                    ByteArrayOutputStream out = new ByteArrayOutputStream();
+                    repo.getFile(file.relativePath(), rev, null, out);
+                    byte[] bytes = out.toByteArray();
+
+                    if (!isProbablyText(null, bytes)) {
+                        continue;
+                    }
+                    String content = decodeUtf8Lenient(bytes);
+                    String searchContent = caseSensitive ? content : content.toLowerCase();
+                    if (!searchContent.contains(searchKeyword)) {
+                        continue;
+                    }
+
+                    String[] lines = content.split("\n", -1);
+                    List<String> matchedLines = new ArrayList<>();
+                    int matchCount = 0;
+                    for (String line : lines) {
+                        String searchLine = caseSensitive ? line : line.toLowerCase();
+                        if (searchLine.contains(searchKeyword)) {
+                            matchCount++;
+                            if (matchedLines.size() < 5) {
+                                matchedLines.add(line.stripLeading());
+                            }
+                        }
+                    }
+
+                    String lastAuthor = null;
+                    long lastRevision = rev;
+                    List<SVNLogEntry> logBuf = new ArrayList<>();
+                    repo.log(
+                            new String[] {file.relativePath()},
+                            rev,
+                            1L,
+                            false,
+                            false,
+                            1L,
+                            false,
+                            null,
+                            (SVNLogEntry le) -> {
+                                if (le.getRevision() >= 0 && logBuf.isEmpty()) {
+                                    logBuf.add(le);
+                                }
+                            });
+                    if (!logBuf.isEmpty()) {
+                        lastAuthor = logBuf.get(0).getAuthor();
+                        lastRevision = logBuf.get(0).getRevision();
+                    }
+
+                    String filePath = file.relativePath();
+                    int lastSlash = filePath.lastIndexOf('/');
+                    String modulePath = lastSlash > 0 ? filePath.substring(0, lastSlash) : normalized;
+                    String fileName = lastSlash >= 0 ? filePath.substring(lastSlash + 1) : filePath;
+
+                    matches.add(
+                            new SearchMatch(
+                                    modulePath,
+                                    filePath,
+                                    fileName,
+                                    lastAuthor,
+                                    lastRevision,
+                                    matchCount,
+                                    matchedLines.isEmpty() ? null : matchedLines));
+                } catch (SVNException e) {
+                    log.warn(
+                            "Skipping file {} during search (r{}): {}",
+                            file.relativePath(),
+                            rev,
+                            e.getMessage());
+                }
+            }
+
+            return new SearchInPathResult(
+                    rev, normalized, keyword, filesScanned, matches.size(), scanLimitReached, matches);
+        } catch (SVNException e) {
+            throw svnAccessFailed("search_in_path", repositoryId, e);
+        }
+    }
+
     private static String authorKey(String author) {
         if (author == null || author.isBlank()) {
             return "(no author)";
@@ -614,10 +761,15 @@ public class SvnKitRepositoryOperations implements SvnRepositoryOperations {
                             1,
                             Math.max(5, d.getDiffMaxFilesPerResponse() * 4));
             int lineOff = Math.max(0, req.lineOffset() != null ? req.lineOffset() : 0);
+            int maxChars =
+                    clampOptional(null, d.getDiffMaxCharsPerLine(), 1, Math.max(100, d.getDiffMaxCharsPerLine() * 4));
+            long maxRespBytes =
+                    clampLongOptional(null, d.getDiffMaxResponseBytes(), 1L, Math.max(1024L, d.getDiffMaxResponseBytes() * 4L));
 
             UnifiedDiffTruncation.Result tr =
-                    UnifiedDiffTruncation.truncate(fullText, maxTotal, maxPerFile, maxFiles, lineOff);
-            return applyByteCapToDiffFile(tr.text(), tr.meta(), spillPath);
+                    UnifiedDiffTruncation.truncate(
+                            fullText, maxTotal, maxPerFile, maxFiles, lineOff, maxChars);
+            return applyByteCapToDiffFile(tr.text(), tr.meta(), spillPath, maxRespBytes);
         } catch (SVNException e) {
             throw svnAccessFailed("diff_file", repositoryId, e);
         }
@@ -637,24 +789,89 @@ public class SvnKitRepositoryOperations implements SvnRepositoryOperations {
             long fromRev,
             String text,
             DiffRevisionTruncation lineMeta,
-            String spillPath) {
-        long max = properties.getDefaults().getFileContentMaxBytes();
-        boolean byteTrunc = text.length() > max;
+            String spillPath,
+            long maxResponseBytes) {
+        long utf8Len = utf8ByteLength(text);
+        boolean byteTrunc = utf8Len > maxResponseBytes;
         String payload =
-                byteTrunc ? text.substring(0, (int) max) + "\n... [truncated by bytes]\n" : text;
-        boolean truncated = byteTrunc || lineMeta.lineTruncated();
+                byteTrunc
+                        ? utf8PrefixWithinByteLimit(text, maxResponseBytes)
+                                + "\n... [truncated by bytes]\n"
+                        : text;
+        DiffRevisionTruncation meta = mergeBytesTruncated(lineMeta, byteTrunc);
+        boolean truncated =
+                byteTrunc
+                        || lineMeta.lineTruncated()
+                        || lineMeta.lineCharsTruncated();
         return new DiffRevisionResult(
-                path, revision, fromRev, payload, truncated, null, spillPath, lineMeta);
+                path, revision, fromRev, payload, truncated, null, spillPath, meta);
     }
 
     private DiffFileResult applyByteCapToDiffFile(
-            String text, DiffRevisionTruncation lineMeta, String spillPath) {
-        long max = properties.getDefaults().getFileContentMaxBytes();
-        boolean byteTrunc = text.length() > max;
+            String text, DiffRevisionTruncation lineMeta, String spillPath, long maxResponseBytes) {
+        long utf8Len = utf8ByteLength(text);
+        boolean byteTrunc = utf8Len > maxResponseBytes;
         String payload =
-                byteTrunc ? text.substring(0, (int) max) + "\n... [truncated by bytes]\n" : text;
-        boolean truncated = byteTrunc || lineMeta.lineTruncated();
-        return new DiffFileResult(payload, truncated, spillPath, lineMeta);
+                byteTrunc
+                        ? utf8PrefixWithinByteLimit(text, maxResponseBytes)
+                                + "\n... [truncated by bytes]\n"
+                        : text;
+        DiffRevisionTruncation meta = mergeBytesTruncated(lineMeta, byteTrunc);
+        boolean truncated =
+                byteTrunc
+                        || lineMeta.lineTruncated()
+                        || lineMeta.lineCharsTruncated();
+        return new DiffFileResult(payload, truncated, spillPath, meta);
+    }
+
+    private static DiffRevisionTruncation mergeBytesTruncated(
+            DiffRevisionTruncation lineMeta, boolean bytesTruncated) {
+        if (lineMeta == null) {
+            return null;
+        }
+        if (!bytesTruncated) {
+            return lineMeta;
+        }
+        return new DiffRevisionTruncation(
+                lineMeta.lineTruncated(),
+                lineMeta.linesEmitted(),
+                lineMeta.linesInFullDiff(),
+                lineMeta.fileSectionsIncluded(),
+                lineMeta.fileSectionsOmitted(),
+                lineMeta.lineOffsetApplied(),
+                lineMeta.nextLineOffset(),
+                lineMeta.hasMore(),
+                lineMeta.lineCharsTruncated(),
+                lineMeta.linesCharCapped(),
+                true);
+    }
+
+    private static long utf8ByteLength(String s) {
+        if (s == null || s.isEmpty()) {
+            return 0;
+        }
+        return s.getBytes(StandardCharsets.UTF_8).length;
+    }
+
+    /** Longest prefix of {@code text} whose UTF-8 encoding length is at most {@code maxBytes}. */
+    private static String utf8PrefixWithinByteLimit(String text, long maxBytes) {
+        if (text.isEmpty() || maxBytes <= 0) {
+            return "";
+        }
+        if (utf8ByteLength(text) <= maxBytes) {
+            return text;
+        }
+        int low = 0;
+        int high = text.length();
+        while (low < high) {
+            int mid = (low + high + 1) / 2;
+            if (utf8ByteLength(text.substring(0, mid)) <= maxBytes) {
+                low = mid;
+            } else {
+                high = mid - 1;
+            }
+        }
+        return text.substring(0, low);
     }
 
     private String writeSpillFileIfConfigured(String repositoryId, long revision, String fullText) {
@@ -683,6 +900,11 @@ public class SvnKitRepositoryOperations implements SvnRepositoryOperations {
 
     private static int clampOptional(Integer value, int def, int min, int max) {
         int v = value != null && value > 0 ? value : def;
+        return Math.min(max, Math.max(min, v));
+    }
+
+    private static long clampLongOptional(Long value, long def, long min, long max) {
+        long v = value != null && value > 0 ? value : def;
         return Math.min(max, Math.max(min, v));
     }
 

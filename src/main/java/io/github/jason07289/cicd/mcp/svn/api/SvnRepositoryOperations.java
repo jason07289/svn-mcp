@@ -66,4 +66,20 @@ public interface SvnRepositoryOperations {
             Date endInclusive,
             Integer maxRevisionsToAnalyze)
             throws SvnAccessException;
+
+    /**
+     * Searches file contents under a path for a keyword, returning matching files with their last
+     * author. All file reads are performed within a single SVN session to avoid N+1 connection
+     * overhead.
+     */
+    SearchInPathResult searchInPath(
+            String repositoryId,
+            String path,
+            String keyword,
+            Long revision,
+            List<String> fileExtensions,
+            boolean caseSensitive,
+            int maxFilesToScan,
+            int maxMatches)
+            throws SvnAccessException;
 }

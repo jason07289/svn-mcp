@@ -13,6 +13,8 @@ import com.fasterxml.jackson.annotation.JsonInclude;
  * @param maxLinesPerFile optional override per file section
  * @param maxFiles optional override of max file sections
  * @param lineOffset skip this many lines from the capped unified output (pagination)
+ * @param maxCharsPerLine optional max UTF-16 code units per line before ellipsizing (server clamps)
+ * @param maxResponseBytes optional max UTF-8 bytes for unified_diff body after caps (server clamps)
  * @param writeSpillFile when true and {@code diff_spill_directory} is configured, writes full diff before
  *     line truncation to a file and returns its path in {@link DiffRevisionResult#spillFilePath()}
  */
@@ -25,6 +27,8 @@ public record DiffRevisionRequest(
         Integer maxLinesPerFile,
         Integer maxFiles,
         Integer lineOffset,
+        Integer maxCharsPerLine,
+        Long maxResponseBytes,
         boolean writeSpillFile) {
 
     public enum LimitPolicy {
@@ -44,12 +48,30 @@ public record DiffRevisionRequest(
     /** Back-compat: unified diff, MCP line limits, no spill. */
     public static DiffRevisionRequest legacy(boolean ignoreWhitespace) {
         return new DiffRevisionRequest(
-                ignoreWhitespace, "unified", LimitPolicy.MCP_DEFAULT, null, null, null, null, false);
+                ignoreWhitespace,
+                "unified",
+                LimitPolicy.MCP_DEFAULT,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                false);
     }
 
     /** Full unified diff for internal line stats; only {@code file_content_max_bytes} applies. */
     public static DiffRevisionRequest internalStats(boolean ignoreWhitespace) {
         return new DiffRevisionRequest(
-                ignoreWhitespace, "unified", LimitPolicy.NONE, null, null, null, null, false);
+                ignoreWhitespace,
+                "unified",
+                LimitPolicy.NONE,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                false);
     }
 }

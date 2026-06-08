@@ -40,4 +40,6 @@ io:
             diff_max_total_lines: 3500
             diff_max_lines_per_file: 1000
             diff_max_files_per_response: 15
+            diff_max_chars_per_line: 800
+            diff_max_response_bytes: 300000
             diff_spill_directory: ""

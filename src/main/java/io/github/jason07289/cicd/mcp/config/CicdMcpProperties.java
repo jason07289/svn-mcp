@@ -149,6 +149,10 @@ public class CicdMcpProperties {
         private int diffMaxLinesPerFile = 1000;
         /** Max number of Index (file) sections in one diff response. */
         private int diffMaxFilesPerResponse = 15;
+        /** Max characters per line in unified diff (long lines are ellipsized for LLM-facing responses). */
+        private int diffMaxCharsPerLine = 800;
+        /** Max UTF-8 byte length of unified_diff in diff_revision / diff_file responses (after line caps). */
+        private long diffMaxResponseBytes = 300_000L;
         /**
          * When set and the client requests write_spill_file, full diff text is written here before line
          * truncation; response includes spill_file_path.
@@ -201,6 +205,22 @@ public class CicdMcpProperties {
 
         public void setDiffMaxFilesPerResponse(int diffMaxFilesPerResponse) {
             this.diffMaxFilesPerResponse = diffMaxFilesPerResponse;
+        }
+
+        public int getDiffMaxCharsPerLine() {
+            return diffMaxCharsPerLine;
+        }
+
+        public void setDiffMaxCharsPerLine(int diffMaxCharsPerLine) {
+            this.diffMaxCharsPerLine = diffMaxCharsPerLine;
+        }
+
+        public long getDiffMaxResponseBytes() {
+            return diffMaxResponseBytes;
+        }
+
+        public void setDiffMaxResponseBytes(long diffMaxResponseBytes) {
+            this.diffMaxResponseBytes = diffMaxResponseBytes;
         }
 
         public String getDiffSpillDirectory() {

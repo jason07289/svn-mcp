@@ -198,6 +198,8 @@ public class SvnMcpTools {
                             ToolArguments.optionalInt(args, "max_lines_per_file"),
                             ToolArguments.optionalInt(args, "max_files"),
                             ToolArguments.optionalInt(args, "line_offset"),
+                            ToolArguments.optionalInt(args, "max_chars_per_line"),
+                            ToolArguments.optionalLong(args, "max_response_bytes"),
                             Boolean.TRUE.equals(
                                     ToolArguments.optionalBoolean(args, "write_spill_file")));
             return jsonOk(svn.diffRevision(repoId, path, revision, request));
@@ -256,6 +258,42 @@ public class SvnMcpTools {
             String path = ToolArguments.requireString(args, "path");
             Long revision = ToolArguments.optionalLong(args, "revision");
             return jsonOk(svn.blameFile(repoId, path, revision));
+        } catch (IllegalArgumentException e) {
+            return textError(e.getMessage());
+        } catch (SvnAccessException e) {
+            return textError(e.getMessage());
+        } catch (JsonProcessingException e) {
+            return jsonError("Serialization error: " + e.getOriginalMessage());
+        }
+    }
+
+    public McpSchema.CallToolResult searchInPath(
+            McpSyncServerExchange exchange, Map<String, Object> args) {
+        try {
+            String repoId = ToolArguments.requireString(args, "repository_id");
+            String path = ToolArguments.requireString(args, "path");
+            String keyword = ToolArguments.requireString(args, "keyword");
+            Long revision = ToolArguments.optionalLong(args, "revision");
+            String extStr = ToolArguments.optionalStringNullable(args, "file_extensions");
+            List<String> exts =
+                    extStr != null && !extStr.isBlank()
+                            ? List.of(extStr.split("[,\\s]+"))
+                            : List.of();
+            Boolean cs = ToolArguments.optionalBoolean(args, "case_sensitive");
+            Integer maxScan = ToolArguments.optionalInt(args, "max_files_to_scan");
+            Integer maxMatches = ToolArguments.optionalInt(args, "max_matches");
+            int scanLimit = maxScan != null && maxScan > 0 ? Math.min(maxScan, 500) : 200;
+            int matchLimit = maxMatches != null && maxMatches > 0 ? Math.min(maxMatches, 200) : 50;
+            return jsonOk(
+                    svn.searchInPath(
+                            repoId,
+                            path,
+                            keyword,
+                            revision,
+                            exts,
+                            Boolean.TRUE.equals(cs),
+                            scanLimit,
+                            matchLimit));
         } catch (IllegalArgumentException e) {
             return textError(e.getMessage());
         } catch (SvnAccessException e) {

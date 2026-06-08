@@ -90,6 +90,22 @@ class SvnKitRepositoryOperationsTest {
     }
 
     @Test
+    void diffRevision_responseByteCap_setsTruncationMeta() throws Exception {
+        LocalSvnRepositorySupport.Fixture fx =
+                LocalSvnRepositorySupport.createTwoRevisionReadmeRepo(tempDir);
+        fx.properties().getDefaults().setDiffMaxResponseBytes(20L);
+        SvnKitRepositoryOperations ops = operations(fx);
+
+        DiffRevisionResult dr =
+                ops.diffRevision("local", "", 2L, DiffRevisionRequest.legacy(false));
+
+        assertThat(dr.truncation()).isNotNull();
+        assertThat(dr.truncation().bytesTruncated()).isTrue();
+        assertThat(dr.truncated()).isTrue();
+        assertThat(dr.unifiedDiff()).contains("[truncated by bytes]");
+    }
+
+    @Test
     void diffFile_ignoreWhitespace_changesOutput() throws Exception {
         LocalSvnRepositorySupport.Fixture fx =
                 LocalSvnRepositorySupport.createTwoRevisionReadmeRepo(tempDir);
@@ -132,6 +148,8 @@ class SvnKitRepositoryOperationsTest {
                                 false,
                                 "paths_only",
                                 DiffRevisionRequest.LimitPolicy.MCP_DEFAULT,
+                                null,
+                                null,
                                 null,
                                 null,
                                 null,

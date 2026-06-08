@@ -12,4 +12,7 @@ public record DiffRevisionTruncation(
         @JsonProperty("file_sections_omitted") int fileSectionsOmitted,
         @JsonProperty("line_offset_applied") int lineOffsetApplied,
         @JsonProperty("next_line_offset") int nextLineOffset,
-        @JsonProperty("has_more") boolean hasMore) {}
+        @JsonProperty("has_more") boolean hasMore,
+        @JsonProperty("line_chars_truncated") boolean lineCharsTruncated,
+        @JsonProperty("lines_char_capped") int linesCharCapped,
+        @JsonProperty("bytes_truncated") boolean bytesTruncated) {}

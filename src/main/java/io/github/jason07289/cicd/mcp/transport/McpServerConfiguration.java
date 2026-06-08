@@ -301,7 +301,7 @@ public class McpServerConfiguration {
                                 .description(
                                         "Unified diff for a single revision (svn diff -c REV) under an optional path prefix. "
                                                 + "For large trees, prefer a narrow path, or use output_mode=paths_only (changed paths only, no body) after scoping with get_revision/get_log. "
-                                                + "Default unified output applies line and file-section caps plus a byte cap (see server defaults). "
+                                                + "Default unified output applies per-line character caps, line and file-section caps, and a UTF-8 byte cap on the diff body (see server defaults) to reduce MCP token overflow. "
                                                 + "Pagination: pass line_offset; read truncation.next_line_offset and truncation.has_more. "
                                                 + "Optional write_spill_file writes the full diff to diff_spill_directory before truncation.")
                                 .inputSchema(
@@ -344,6 +344,14 @@ public class McpServerConfiguration {
                                                                 "line_offset",
                                                                 McpJsonSchemas.integerProp(
                                                                         "Skip this many lines from the capped unified diff (pagination).")),
+                                                        Map.entry(
+                                                                "max_chars_per_line",
+                                                                McpJsonSchemas.integerProp(
+                                                                        "Optional max UTF-16 code units per diff line before ellipsizing (server clamps).")),
+                                                        Map.entry(
+                                                                "max_response_bytes",
+                                                                McpJsonSchemas.integerProp(
+                                                                        "Optional max UTF-8 bytes for unified_diff after caps (server clamps).")),
                                                         Map.entry(
                                                                 "write_spill_file",
                                                                 McpJsonSchemas.booleanProp(
@@ -391,6 +399,58 @@ public class McpServerConfiguration {
                                 .build(),
                         (exchange, request) ->
                                 tools.repositoryAuthorStats(
+                                        exchange,
+                                        request.arguments() != null
+                                                ? request.arguments()
+                                                : Map.of()))
+                .toolCall(
+                        McpSchema.Tool.builder()
+                                .name("search_in_path")
+                                .description(
+                                        "Searches file contents under a path for a keyword (e.g. a table name) "
+                                                + "and returns matching files with their last author. "
+                                                + "All file reads share a single SVN session to avoid N+1 connection overhead. "
+                                                + "Result format per match: modulePath | filePath | lastAuthor. "
+                                                + "Use file_extensions to narrow the scan (default: java).")
+                                .inputSchema(
+                                        McpJsonSchemas.object(
+                                                Map.ofEntries(
+                                                        Map.entry(
+                                                                "repository_id",
+                                                                McpJsonSchemas.stringProp(
+                                                                        "Repository id from configuration.")),
+                                                        Map.entry(
+                                                                "path",
+                                                                McpJsonSchemas.stringProp(
+                                                                        "Base path to search under (e.g. trunk/com/example/service).")),
+                                                        Map.entry(
+                                                                "keyword",
+                                                                McpJsonSchemas.stringProp(
+                                                                        "Keyword to search for in file contents (e.g. table name, SQL fragment).")),
+                                                        Map.entry(
+                                                                "revision",
+                                                                McpJsonSchemas.integerProp(
+                                                                        "Optional revision number; omit for HEAD.")),
+                                                        Map.entry(
+                                                                "file_extensions",
+                                                                McpJsonSchemas.stringProp(
+                                                                        "Comma-separated file extensions to include (default: java). Examples: java,xml or java,xml,properties.")),
+                                                        Map.entry(
+                                                                "case_sensitive",
+                                                                McpJsonSchemas.booleanProp(
+                                                                        "If true, keyword matching is case-sensitive (default: false).")),
+                                                        Map.entry(
+                                                                "max_files_to_scan",
+                                                                McpJsonSchemas.integerProp(
+                                                                        "Max number of matching-extension files to read (capped at 500, default 200).")),
+                                                        Map.entry(
+                                                                "max_matches",
+                                                                McpJsonSchemas.integerProp(
+                                                                        "Stop collecting results after this many matches (capped at 200, default 50)."))),
+                                                List.of("repository_id", "path", "keyword")))
+                                .build(),
+                        (exchange, request) ->
+                                tools.searchInPath(
                                         exchange,
                                         request.arguments() != null
                                                 ? request.arguments()
