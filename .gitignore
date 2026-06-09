@@ -6,7 +6,16 @@ out/
 .vscode/
 .DS_Store
 
+# Eclipse (repo opened as Eclipse workspace / Buildship)
+.metadata/
+.project
+.settings/
+
+# Local tooling (oh-my-claudecode / Cursor OMC)
+.omc/
+
 # Local bundle artifacts
 cicd-mcp.tar
+cicd-mcp-*.tar
 k8s_cicd_mcp.zip
 bin/
