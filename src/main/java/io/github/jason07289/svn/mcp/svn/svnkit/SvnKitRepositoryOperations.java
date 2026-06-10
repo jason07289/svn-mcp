@@ -7,8 +7,6 @@ import io.github.jason07289.svn.mcp.svn.api.SearchInPathResult;
 import io.github.jason07289.svn.mcp.svn.api.SearchMatch;
 import io.github.jason07289.svn.mcp.svn.service.RepositoryEntryResolver;
 import java.io.ByteArrayOutputStream;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.nio.charset.CharacterCodingException;
 import java.nio.charset.CharsetDecoder;
 import java.nio.charset.CodingErrorAction;
@@ -36,10 +34,8 @@ import org.tmatesoft.svn.core.SVNProperty;
 import org.tmatesoft.svn.core.SVNURL;
 import org.tmatesoft.svn.core.auth.ISVNAuthenticationManager;
 import org.tmatesoft.svn.core.io.SVNRepository;
-import org.tmatesoft.svn.core.io.SVNRepositoryFactory;
 import org.tmatesoft.svn.core.wc.SVNDiffOptions;
 import org.tmatesoft.svn.core.wc.SVNRevision;
-import org.tmatesoft.svn.core.wc.SVNWCUtil;
 import org.tmatesoft.svn.core.wc2.SvnAnnotate;
 import org.tmatesoft.svn.core.wc2.SvnDiff;
 import org.tmatesoft.svn.core.wc2.SvnOperationFactory;
@@ -63,11 +59,15 @@ public class SvnKitRepositoryOperations implements SvnRepositoryOperations {
 
     private final RepositoryEntryResolver resolver;
     private final SvnMcpProperties properties;
+    private final DiffResponseLimiter diffLimiter;
+    private final SvnKitRepositorySessionFactory sessionFactory;
 
     public SvnKitRepositoryOperations(
             RepositoryEntryResolver resolver, SvnMcpProperties properties) {
         this.resolver = resolver;
         this.properties = properties;
+        this.diffLimiter = new DiffResponseLimiter(properties.getDefaults());
+        this.sessionFactory = new SvnKitRepositorySessionFactory();
     }
 
     @Override
@@ -83,7 +83,7 @@ public class SvnKitRepositoryOperations implements SvnRepositoryOperations {
         RepositoryEntry entry = resolver.require(repositoryId);
         String normalized = normalizePath(path);
         String mode = viewMode == null || viewMode.isBlank() ? "tree" : viewMode.toLowerCase();
-        try (RepositorySession session = open(entry)) {
+        try (SvnKitRepositorySession session = open(entry)) {
             SVNRepository repo = session.repository();
             long rev = resolveRevision(repo, revision);
             if ("flat".equals(mode)) {
@@ -128,7 +128,7 @@ public class SvnKitRepositoryOperations implements SvnRepositoryOperations {
             throws SvnAccessException {
         RepositoryEntry entry = resolver.require(repositoryId);
         String normalized = normalizePath(path);
-        try (RepositorySession session = open(entry)) {
+        try (SvnKitRepositorySession session = open(entry)) {
             SVNRepository repo = session.repository();
             long rev = resolveRevision(repo, revision);
             SVNNodeKind kind = repo.checkPath(normalized, rev);
@@ -182,7 +182,7 @@ public class SvnKitRepositoryOperations implements SvnRepositoryOperations {
                         ? maxLimit
                         : Math.min(limit, properties.getDefaults().getLogLimitMax());
         boolean stop = stopOnCopy != null && stopOnCopy;
-        try (RepositorySession session = open(entry)) {
+        try (SvnKitRepositorySession session = open(entry)) {
             SVNRepository repo = session.repository();
             long latest = repo.getLatestRevision();
             long start;
@@ -252,7 +252,7 @@ public class SvnKitRepositoryOperations implements SvnRepositoryOperations {
         }
         RepositoryEntry entry = resolver.require(repositoryId);
         String normalized = normalizePath(path);
-        try (RepositorySession session = open(entry)) {
+        try (SvnKitRepositorySession session = open(entry)) {
             SVNRepository repo = session.repository();
             long rEnd = repo.getDatedRevision(endInclusive);
             long rStart = repo.getDatedRevision(startInclusive);
@@ -296,7 +296,7 @@ public class SvnKitRepositoryOperations implements SvnRepositoryOperations {
             throw new SvnAccessException(
                     "output_mode must be unified or paths_only, got: " + request.outputMode());
         }
-        try (RepositorySession session = open(entry)) {
+        try (SvnKitRepositorySession session = open(entry)) {
             SVNURL targetUrl =
                     normalized.isEmpty()
                             ? session.rootUrl()
@@ -322,51 +322,17 @@ public class SvnKitRepositoryOperations implements SvnRepositoryOperations {
 
             String spillPath = null;
             if (request.writeSpillFile()) {
-                spillPath = writeSpillFileIfConfigured(repositoryId, revision, fullText);
+                spillPath =
+                        diffLimiter.writeRevisionSpillFileIfConfigured(
+                                repositoryId, revision, fullText);
             }
 
             if (request.limitPolicy() == DiffRevisionRequest.LimitPolicy.NONE) {
-                return byteCapDiffRevision(normalized, revision, fromRev, fullText, spillPath);
+                return diffLimiter.legacyByteCapRevision(
+                        normalized, revision, fromRev, fullText, spillPath);
             }
 
-            SvnMcpProperties.Defaults d = properties.getDefaults();
-            int maxTotal =
-                    clampOptional(
-                            request.maxTotalLines(),
-                            d.getDiffMaxTotalLines(),
-                            1,
-                            Math.max(100, d.getDiffMaxTotalLines() * 4));
-            int maxPerFile =
-                    clampOptional(
-                            request.maxLinesPerFile(),
-                            d.getDiffMaxLinesPerFile(),
-                            1,
-                            Math.max(50, d.getDiffMaxLinesPerFile() * 4));
-            int maxFiles =
-                    clampOptional(
-                            request.maxFiles(),
-                            d.getDiffMaxFilesPerResponse(),
-                            1,
-                            Math.max(5, d.getDiffMaxFilesPerResponse() * 4));
-            int lineOff = Math.max(0, request.lineOffset() != null ? request.lineOffset() : 0);
-            int maxChars =
-                    clampOptional(
-                            request.maxCharsPerLine(),
-                            d.getDiffMaxCharsPerLine(),
-                            1,
-                            Math.max(100, d.getDiffMaxCharsPerLine() * 4));
-            long maxRespBytes =
-                    clampLongOptional(
-                            request.maxResponseBytes(),
-                            d.getDiffMaxResponseBytes(),
-                            1L,
-                            Math.max(1024L, d.getDiffMaxResponseBytes() * 4L));
-
-            UnifiedDiffTruncation.Result tr =
-                    UnifiedDiffTruncation.truncate(
-                            fullText, maxTotal, maxPerFile, maxFiles, lineOff, maxChars);
-            return applyByteCapToDiffRevision(
-                    normalized, revision, fromRev, tr.text(), tr.meta(), spillPath, maxRespBytes);
+            return diffLimiter.limitRevision(normalized, revision, fromRev, fullText, spillPath, request);
         } catch (SVNException e) {
             throw svnAccessFailed("diff_revision", repositoryId, e);
         }
@@ -526,7 +492,7 @@ public class SvnKitRepositoryOperations implements SvnRepositoryOperations {
                                 .map(s -> s.toLowerCase().replaceFirst("^\\.", ""))
                                 .collect(java.util.stream.Collectors.toSet());
 
-        try (RepositorySession session = open(entry)) {
+        try (SvnKitRepositorySession session = open(entry)) {
             SVNRepository repo = session.repository();
             long rev = resolveRevision(repo, revision);
 
@@ -677,7 +643,7 @@ public class SvnKitRepositoryOperations implements SvnRepositoryOperations {
     public GetRevisionResult getRevision(String repositoryId, long revision)
             throws SvnAccessException {
         RepositoryEntry entry = resolver.require(repositoryId);
-        try (RepositorySession session = open(entry)) {
+        try (SvnKitRepositorySession session = open(entry)) {
             SVNRepository repo = session.repository();
             List<GetRevisionResult> holder = new ArrayList<>(1);
             repo.log(
@@ -723,7 +689,7 @@ public class SvnKitRepositoryOperations implements SvnRepositoryOperations {
         if (fromRevision == null || toRevision == null) {
             throw new SvnAccessException("from_revision and to_revision are required");
         }
-        try (RepositorySession session = open(entry)) {
+        try (SvnKitRepositorySession session = open(entry)) {
             SVNURL fileUrl = session.rootUrl().appendPath(normalized, false);
             ISVNAuthenticationManager auth = session.auth();
             SvnOperationFactory factory = new SvnOperationFactory();
@@ -747,173 +713,14 @@ public class SvnKitRepositoryOperations implements SvnRepositoryOperations {
             String spillPath = null;
             if (req.writeSpillFile()) {
                 spillPath =
-                        writeSpillFileIfConfigured(
-                                repositoryId + "-file-" + fromRevision + "-" + toRevision,
-                                fullText);
+                        diffLimiter.writeFileSpillFileIfConfigured(
+                                repositoryId, fromRevision, toRevision, fullText);
             }
 
-            SvnMcpProperties.Defaults d = properties.getDefaults();
-            int maxTotal =
-                    clampOptional(
-                            req.maxTotalLines(), d.getDiffMaxTotalLines(), 1, d.getDiffMaxTotalLines() * 4);
-            int maxPerFile =
-                    clampOptional(
-                            null,
-                            d.getDiffMaxLinesPerFile(),
-                            1,
-                            Math.max(50, d.getDiffMaxLinesPerFile() * 4));
-            int maxFiles =
-                    clampOptional(
-                            null,
-                            d.getDiffMaxFilesPerResponse(),
-                            1,
-                            Math.max(5, d.getDiffMaxFilesPerResponse() * 4));
-            int lineOff = Math.max(0, req.lineOffset() != null ? req.lineOffset() : 0);
-            int maxChars =
-                    clampOptional(null, d.getDiffMaxCharsPerLine(), 1, Math.max(100, d.getDiffMaxCharsPerLine() * 4));
-            long maxRespBytes =
-                    clampLongOptional(null, d.getDiffMaxResponseBytes(), 1L, Math.max(1024L, d.getDiffMaxResponseBytes() * 4L));
-
-            UnifiedDiffTruncation.Result tr =
-                    UnifiedDiffTruncation.truncate(
-                            fullText, maxTotal, maxPerFile, maxFiles, lineOff, maxChars);
-            return applyByteCapToDiffFile(tr.text(), tr.meta(), spillPath, maxRespBytes);
+            return diffLimiter.limitFile(fullText, spillPath, req);
         } catch (SVNException e) {
             throw svnAccessFailed("diff_file", repositoryId, e);
         }
-    }
-
-    private DiffRevisionResult byteCapDiffRevision(
-            String path, long revision, long fromRev, String text, String spillPath) {
-        long max = properties.getDefaults().getFileContentMaxBytes();
-        boolean truncated = text.length() > max;
-        String payload = truncated ? text.substring(0, (int) max) + "\n... [truncated]\n" : text;
-        return new DiffRevisionResult(path, revision, fromRev, payload, truncated, null, spillPath, null);
-    }
-
-    private DiffRevisionResult applyByteCapToDiffRevision(
-            String path,
-            long revision,
-            long fromRev,
-            String text,
-            DiffRevisionTruncation lineMeta,
-            String spillPath,
-            long maxResponseBytes) {
-        long utf8Len = utf8ByteLength(text);
-        boolean byteTrunc = utf8Len > maxResponseBytes;
-        String payload =
-                byteTrunc
-                        ? utf8PrefixWithinByteLimit(text, maxResponseBytes)
-                                + "\n... [truncated by bytes]\n"
-                        : text;
-        DiffRevisionTruncation meta = mergeBytesTruncated(lineMeta, byteTrunc);
-        boolean truncated =
-                byteTrunc
-                        || lineMeta.lineTruncated()
-                        || lineMeta.lineCharsTruncated();
-        return new DiffRevisionResult(
-                path, revision, fromRev, payload, truncated, null, spillPath, meta);
-    }
-
-    private DiffFileResult applyByteCapToDiffFile(
-            String text, DiffRevisionTruncation lineMeta, String spillPath, long maxResponseBytes) {
-        long utf8Len = utf8ByteLength(text);
-        boolean byteTrunc = utf8Len > maxResponseBytes;
-        String payload =
-                byteTrunc
-                        ? utf8PrefixWithinByteLimit(text, maxResponseBytes)
-                                + "\n... [truncated by bytes]\n"
-                        : text;
-        DiffRevisionTruncation meta = mergeBytesTruncated(lineMeta, byteTrunc);
-        boolean truncated =
-                byteTrunc
-                        || lineMeta.lineTruncated()
-                        || lineMeta.lineCharsTruncated();
-        return new DiffFileResult(payload, truncated, spillPath, meta);
-    }
-
-    private static DiffRevisionTruncation mergeBytesTruncated(
-            DiffRevisionTruncation lineMeta, boolean bytesTruncated) {
-        if (lineMeta == null) {
-            return null;
-        }
-        if (!bytesTruncated) {
-            return lineMeta;
-        }
-        return new DiffRevisionTruncation(
-                lineMeta.lineTruncated(),
-                lineMeta.linesEmitted(),
-                lineMeta.linesInFullDiff(),
-                lineMeta.fileSectionsIncluded(),
-                lineMeta.fileSectionsOmitted(),
-                lineMeta.lineOffsetApplied(),
-                lineMeta.nextLineOffset(),
-                lineMeta.hasMore(),
-                lineMeta.lineCharsTruncated(),
-                lineMeta.linesCharCapped(),
-                true);
-    }
-
-    private static long utf8ByteLength(String s) {
-        if (s == null || s.isEmpty()) {
-            return 0;
-        }
-        return s.getBytes(StandardCharsets.UTF_8).length;
-    }
-
-    /** Longest prefix of {@code text} whose UTF-8 encoding length is at most {@code maxBytes}. */
-    private static String utf8PrefixWithinByteLimit(String text, long maxBytes) {
-        if (text.isEmpty() || maxBytes <= 0) {
-            return "";
-        }
-        if (utf8ByteLength(text) <= maxBytes) {
-            return text;
-        }
-        int low = 0;
-        int high = text.length();
-        while (low < high) {
-            int mid = (low + high + 1) / 2;
-            if (utf8ByteLength(text.substring(0, mid)) <= maxBytes) {
-                low = mid;
-            } else {
-                high = mid - 1;
-            }
-        }
-        return text.substring(0, low);
-    }
-
-    private String writeSpillFileIfConfigured(String repositoryId, long revision, String fullText) {
-        return writeSpillFileIfConfigured(repositoryId + "-r" + revision, fullText);
-    }
-
-    private String writeSpillFileIfConfigured(String nameKey, String fullText) {
-        String dir = properties.getDefaults().getDiffSpillDirectory();
-        if (dir == null || dir.isBlank()) {
-            if (fullText != null && !fullText.isEmpty()) {
-                log.warn("write_spill_file requested but diff_spill_directory is not set; skipping spill");
-            }
-            return null;
-        }
-        try {
-            Path d = Path.of(dir);
-            Files.createDirectories(d);
-            Path f = d.resolve("svn-mcp-diff-" + nameKey + "-" + System.nanoTime() + ".diff");
-            Files.writeString(f, fullText, StandardCharsets.UTF_8);
-            return f.toAbsolutePath().toString();
-        } catch (Exception e) {
-            log.warn("Failed to write diff spill file: {}", e.getMessage());
-            return null;
-        }
-    }
-
-    private static int clampOptional(Integer value, int def, int min, int max) {
-        int v = value != null && value > 0 ? value : def;
-        return Math.min(max, Math.max(min, v));
-    }
-
-    private static long clampLongOptional(Long value, long def, long min, long max) {
-        long v = value != null && value > 0 ? value : def;
-        return Math.min(max, Math.max(min, v));
     }
 
     @Override
@@ -921,7 +728,7 @@ public class SvnKitRepositoryOperations implements SvnRepositoryOperations {
             throws SvnAccessException {
         RepositoryEntry entry = resolver.require(repositoryId);
         String normalized = normalizePath(path);
-        try (RepositorySession session = open(entry)) {
+        try (SvnKitRepositorySession session = open(entry)) {
             SVNRepository repo = session.repository();
             long endRev = revision != null ? revision : repo.getLatestRevision();
             SVNURL fileUrl = session.rootUrl().appendPath(normalized, false);
@@ -1043,24 +850,8 @@ public class SvnKitRepositoryOperations implements SvnRepositoryOperations {
         return kind.toString();
     }
 
-    private RepositorySession open(RepositoryEntry entry) throws SVNException {
-        SVNURL root = SVNURL.parseURIEncoded(entry.getRootUrl());
-        SVNRepository repository = SVNRepositoryFactory.create(root);
-        ISVNAuthenticationManager auth = buildAuth(entry);
-        repository.setAuthenticationManager(auth);
-        return new RepositorySession(repository, root, auth);
-    }
-
-    private ISVNAuthenticationManager buildAuth(RepositoryEntry entry) {
-        String user = entry.getCredentials().getUsername();
-        String pass = entry.getCredentials().getPassword();
-        boolean hasUser = user != null && !user.isBlank();
-        boolean hasPass = pass != null && !pass.isBlank();
-        if (hasUser || hasPass) {
-            return SVNWCUtil.createDefaultAuthenticationManager(
-                    hasUser ? user : "", hasPass ? pass.toCharArray() : null);
-        }
-        return SVNWCUtil.createDefaultAuthenticationManager();
+    private SvnKitRepositorySession open(RepositoryEntry entry) throws SVNException {
+        return sessionFactory.open(entry);
     }
 
     private long resolveRevision(SVNRepository repo, Long revision) throws SVNException {
@@ -1140,14 +931,5 @@ public class SvnKitRepositoryOperations implements SvnRepositoryOperations {
                 svnMessage(e),
                 e);
         return new SvnAccessException(svnMessage(e), e);
-    }
-
-    private record RepositorySession(
-            SVNRepository repository, SVNURL rootUrl, ISVNAuthenticationManager auth)
-            implements AutoCloseable {
-        @Override
-        public void close() {
-            repository.closeSession();
-        }
     }
 }

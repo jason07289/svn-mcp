@@ -45,7 +45,7 @@ class SvnMcpToolsTest {
                                         "https://svn.example.com/demo",
                                         "default")));
 
-        McpSchema.CallToolResult result = tools.listRepositories(null, Map.of());
+        McpSchema.CallToolResult result = tools.listRepositories(Map.of());
         assertThat(result.isError()).isFalse();
         String json = ((McpSchema.TextContent) result.content().get(0)).text();
         assertThat(json)
@@ -56,7 +56,7 @@ class SvnMcpToolsTest {
 
     @Test
     void listPath_missingRepositoryId_returnsError() {
-        McpSchema.CallToolResult result = tools.listPath(null, Map.of("path", ""));
+        McpSchema.CallToolResult result = tools.listPath(Map.of("path", ""));
         assertThat(result.isError()).isTrue();
     }
 
@@ -81,7 +81,6 @@ class SvnMcpToolsTest {
 
         McpSchema.CallToolResult result =
                 tools.listPath(
-                        null,
                         Map.of(
                                 "repository_id", "r1",
                                 "path", "trunk",
@@ -97,7 +96,7 @@ class SvnMcpToolsTest {
                 .thenThrow(new SvnAccessException("boom"));
 
         McpSchema.CallToolResult result =
-                tools.listPath(null, Map.of("repository_id", "r1", "path", ""));
+                tools.listPath(Map.of("repository_id", "r1", "path", ""));
         assertThat(result.isError()).isTrue();
         assertThat(((McpSchema.TextContent) result.content().get(0)).text()).contains("boom");
     }
@@ -105,7 +104,7 @@ class SvnMcpToolsTest {
     @Test
     void getFile_missingPath_returnsError() {
         McpSchema.CallToolResult result =
-                tools.getFile(null, Map.of("repository_id", "r1"));
+                tools.getFile(Map.of("repository_id", "r1"));
         assertThat(result.isError()).isTrue();
     }
 
@@ -125,7 +124,6 @@ class SvnMcpToolsTest {
 
         McpSchema.CallToolResult result =
                 tools.getFile(
-                        null,
                         Map.of(
                                 "repository_id", "r1",
                                 "path", "f.txt"));
@@ -161,7 +159,7 @@ class SvnMcpToolsTest {
                                                 Map.of("/x", "M")))));
 
         McpSchema.CallToolResult result =
-                tools.getLog(null, Map.of("repository_id", "r1"));
+                tools.getLog(Map.of("repository_id", "r1"));
         assertThat(result.isError()).isFalse();
         assertThat(((McpSchema.TextContent) result.content().get(0)).text()).contains("alice");
     }
@@ -175,7 +173,6 @@ class SvnMcpToolsTest {
 
         McpSchema.CallToolResult result =
                 tools.getRevision(
-                        null,
                         Map.of(
                                 "repository_id", "r1",
                                 "revision", 5));
@@ -191,7 +188,6 @@ class SvnMcpToolsTest {
 
         McpSchema.CallToolResult result =
                 tools.diffFile(
-                        null,
                         Map.of(
                                 "repository_id", "r1",
                                 "path", "p",
@@ -211,7 +207,6 @@ class SvnMcpToolsTest {
 
         McpSchema.CallToolResult result =
                 tools.blameFile(
-                        null,
                         Map.of(
                                 "repository_id", "r1",
                                 "path", "p"));

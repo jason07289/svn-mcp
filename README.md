@@ -14,23 +14,21 @@ Traditional SVN browsing (for example [WebSVN](https://github.com/websvnphp/webs
 
 ---
 
-## Features (from PRD)
+## Current MCP Tools
 
-Capabilities are aligned with WebSVN-style flows and exposed as MCP **`tool`** calls (names are illustrative; implementation uses consistent `snake_case`).
+Capabilities are aligned with WebSVN-style flows and exposed as MCP **`tool`** calls using stable `snake_case` names.
 
 | Area | Tools / behavior |
 |------|------------------|
-| **Repositories** | `list_repositories` — configured repo IDs, names, root URLs, groups; optional last-activity style info (`repo_last_activity`). |
+| **Repositories** | `list_repositories` — configured repo IDs, names, root URLs, groups. |
 | **Browse** | `list_path` — directory entries at a revision (or peg); tree or flat view with limits. |
 | **Files** | `get_file` — file contents at a revision (text or Base64); metadata such as `mime_type`, `is_text`, `encoding_hint`. |
-| **History** | `get_log` — commit log for a path with limits and revision range; `changed_paths` per revision; optional Bugtraq issue extraction from log messages. |
+| **History** | `get_log` — commit log for a path with limits and revision range; `changed_paths` per revision. |
 | **Revision** | `get_revision` — one revision’s metadata and changed paths (add/modify/delete). |
-| **Diff** | `diff_file` — compare two revisions of a file (e.g. unified diff); `ignore_whitespace` option. `diff_paths` — diff across paths/revisions. |
+| **Diff** | `diff_file` — compare two revisions of a file. `diff_revision` — one revision’s unified diff or changed paths only. |
 | **Blame** | `blame_file` — per-line revision, author, and content. |
+| **Stats** | `resolve_revision_range`, `repository_author_stats` — map dates to revisions and aggregate author activity. |
 | **Search** | `search_in_path` — search file contents under a path for a keyword (e.g. a table name) and return matching files with their last author. All file reads share a single SVN session to avoid N+1 connection overhead. Required: `repository_id`, `path`, `keyword`; optional: `revision`, `file_extensions` (comma-separated, default `java`), `case_sensitive`, `max_files_to_scan`, `max_matches`. |
-| **Activity** | `get_recent_activity` — recent changes as JSON (RSS-style feed behavior without requiring public RSS hosting). |
-| **Export** | `export_path` — export archive or streaming download (with size/security policies). |
-| **Security** | Optional **`authz`**-based read guards on paths; credentials only on the server (env / secrets). |
 
 **In scope:** MCP protocol, Streamable HTTP transport, read-heavy SVN operations above, multi-repo config, optional path-level authz.
 
@@ -54,7 +52,7 @@ Capabilities are aligned with WebSVN-style flows and exposed as MCP **`tool`** c
 | Phase | Focus |
 |-------|--------|
 | **MVP** | `list_repositories`, `list_path`, `get_file`, `get_log`, `get_revision`, `diff_file`, `blame_file`, basic errors |
-| **1.1** | `diff_paths`, limited `search`, authz guard, tighter response limits |
+| **1.1** | `diff_paths`, parent SVN URL live discovery, authz guard, tighter response limits |
 | **1.2** | `export_path`, Bugtraq extraction, `get_recent_activity` |
 | **2.0** | Optional syntax highlight, RSS XML, advanced search (TBD) |
 

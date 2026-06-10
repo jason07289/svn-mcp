@@ -69,7 +69,7 @@ MCP `tool` 이름은 **snake_case**로 일관되게 정한다.
 
 | 영역 | 기대 동작 |
 |------|-----------|
-| 저장소 | 설정된 다중 저장소 나열; 필요 시 부모 SVN URL로 하위 엔트리 **라이브 탐색** |
+| 저장소 | 설정된 다중 저장소 나열; 부모 SVN URL 하위 엔트리 **라이브 탐색**은 후속 기능 |
 | 탐색 | 리비전 기준 디렉터리·파일 목록(트리/플랫 등) |
 | 파일 | 특정 리비전의 파일 내용(텍스트·바이너리), MIME·용량 상한 |
 | 이력 | 경로별 커밋 로그, 단일 리비전 상세·변경 경로 |
@@ -94,7 +94,7 @@ MCP `tool` 이름은 **snake_case**로 일관되게 정한다.
 
 | 도구명 | 역할 | 주요 인자·동작 | 프롬프트 예시 |
 |--------|------|----------------|---------------|
-| `list_repositories` | `application.yml`에 정의된 저장소 목록, 또는 부모 SVN URL의 **자식 엔트리** 1단계 나열(라이브 탐색) | 인자 없음 또는 `server_url`, 선택 `credential_repository_id` / `username`·`password`. 단일 저장소 루트면 `trunk` 등이 나올 수 있음. | 「설정에 등록된 SVN 저장소 id와 이름을 알려줘.」<br>「`svn://svn.example.com:3690/` 바로 아래에 어떤 저장소(또는 디렉터리)가 있는지 목록만 뽑아 줘.」 |
+| `list_repositories` | `application.yml`에 정의된 저장소 목록 | 인자 없음. 응답에는 저장소 id·이름·root URL·group·source만 포함하며 자격 증명은 반환하지 않음. | 「설정에 등록된 SVN 저장소 id와 이름을 알려줘.」 |
 | `list_path` | 지정 리비전에서 디렉터리 **한 단계(tree)** 또는 경로 아래 **파일 나열(flat)** | `repository_id`, `path`(빈 문자열=루트), `revision`, `view_mode`(`tree`\|`flat`), `flat_max_depth`, `flat_max_entries`. `peg_revision`은 예약. | 「`my-repo` 루트에서 HEAD 기준으로 폴더만 한 단계 보여줘.」<br>「`trunk/src` 아래에 있는 파일을 flat으로, 깊이 3까지 최대 100개만.」 |
 | `get_file` | 한 파일의 내용(텍스트 또는 Base64); 바이너리·MIME·용량 상한 | `repository_id`, `path`, 선택 `revision`(생략 시 HEAD). | 「`my-repo`의 `trunk/README.md` 내용을 HEAD에서 가져와.」<br>「리비전 1200에서 `conf/app.yml` 원문을 보여줘.」 |
 | `get_log` | 경로에 영향을 준 커밋 로그(최신순), 변경 경로 포함 | `repository_id`, `path`, `limit`, `start_revision`/`end_revision`, `stop_on_copy`, 또는 `start_date`/`end_date`(ISO-8601), `author`, `author_match`(`exact`\|`contains`). | 「`trunk` 아래 최근 30개 커밋 로그만.」<br>「2025-01-01부터 2025-01-31까지 커밋한 것만, 작성자가 `kim`인 항목 위주로.」 |
@@ -107,7 +107,8 @@ MCP `tool` 이름은 **snake_case**로 일관되게 정한다.
 
 **아직 미구현([7. 로드맵](#7-단계별-로드맵-제안)과 동일하게 후순위)**
 
-- `diff_paths`, `search`, `get_recent_activity`, `export_path`
+- `diff_paths`, `get_recent_activity`, `export_path`
+- 부모 SVN URL의 자식 엔트리 라이브 탐색(`list_repositories` 확장 또는 별도 도구)
 - `authz` 기반 **도구 공통 권한 가드**(설정 키만 존재)
 - Bugtraq 이슈 ID 추출(저장소별 `bugtraq.log_regex`는 프로퍼티에 존재, 도구 응답 연동은 미구현으로 둘 수 있음)
 - (선택) `repo_last_activity`, 서버 측 구문 하이라이트
@@ -173,8 +174,8 @@ io:
 
 | Phase | 내용 |
 |-------|------|
-| **MVP (달성)** | `list_repositories`(설정 + 선택적 `server_url` 라이브 탐색), `list_path`, `get_file`, `get_log`(날짜·작성자 필터 포함), `get_revision`, `diff_file`, `blame_file`, `resolve_revision_range`, `diff_revision`, `repository_author_stats`, SVNKit 기반 오류 처리(`SvnAccessException` 등) |
-| **1.1** | `diff_paths`, `search`(제한적), **`authz` 가드 구현**, 응답 크기 제한·관측 로그 강화, (선택) `repo_last_activity` |
+| **MVP (달성)** | `list_repositories`(설정 목록), `list_path`, `get_file`, `get_log`(날짜·작성자 필터 포함), `get_revision`, `diff_file`, `blame_file`, `resolve_revision_range`, `diff_revision`, `repository_author_stats`, `search_in_path`, SVNKit 기반 오류 처리(`SvnAccessException` 등) |
+| **1.1** | `diff_paths`, 부모 SVN URL 라이브 탐색, **`authz` 가드 구현**, 응답 크기 제한·관측 로그 강화, (선택) `repo_last_activity` |
 | **1.2** | `export_path`, Bugtraq 추출(도구 응답 연동), `get_recent_activity` |
 | **2.0** | 선택적 구문 하이라이트, RSS XML, 고급 검색(인덱스/외부 도구 연동 검토) |
 
@@ -182,7 +183,7 @@ io:
 
 ## 8. 성공 지표
 
-- **읽기·분석 흐름**을 MCP 도구만으로 재현 가능할 것(에이전트 데모 시나리오). **현재** [4.2절 구현 현황](#42-구현-현황-코드베이스-기준-2026-03)에 열거된 도구로 브라우징·로그·리비전·파일·diff·blame·기간 통계·(선택) 서버 URL 탐색까지 검증 가능.
+- **읽기·분석 흐름**을 MCP 도구만으로 재현 가능할 것(에이전트 데모 시나리오). **현재** [4.2절 구현 현황](#42-구현-현황-코드베이스-기준-2026-03)에 열거된 도구로 브라우징·로그·리비전·파일·diff·blame·기간 통계·검색까지 검증 가능.
 - **IDE/에이전트 호스트에 Subversion CLI를 설치하지 않아도** Streamable HTTP로 MCP만 연결해 동일 기능을 쓸 수 있을 것.
 - MCP 서버가 네트워크·자격 증명이 허용되는 한 **SVN 서버에 직접 접근(SVNKit)** 해 도구가 성공할 것.
 - 권한이 없는 경로는 **일관되게 거부**될 것.

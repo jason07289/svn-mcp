@@ -102,7 +102,7 @@ trunk/module-b/src/main/resources/mapper         | OrderMapper.xml   | dev_park
 | 단계 | 내용 |
 |------|------|
 | **MVP** | `list_repositories`, `list_path`, `get_file`, `get_log`, `get_revision`, `diff_file`, `blame_file`, 기본 오류 |
-| **1.1** | `diff_paths`, 제한적 `search`, authz 가드, 응답 한도 강화 |
+| **1.1** | `diff_paths`, 부모 SVN URL 라이브 탐색, authz 가드, 응답 한도 강화 |
 | **1.2** | `export_path`, Bugtraq 추출, `get_recent_activity` |
 | **2.0** | 선택 구문 하이라이트, RSS XML, 고급 검색(검토) |
 
