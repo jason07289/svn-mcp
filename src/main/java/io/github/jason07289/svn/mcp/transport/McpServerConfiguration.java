@@ -9,14 +9,38 @@ import io.modelcontextprotocol.spec.McpSchema;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.DependsOn;
+import org.springframework.context.event.EventListener;
 import org.springframework.web.servlet.function.RouterFunction;
 import org.springframework.web.servlet.function.ServerResponse;
 
 @Configuration
 public class McpServerConfiguration {
+
+    private static final Logger log = LoggerFactory.getLogger(McpServerConfiguration.class);
+
+    private final McpSyncServer mcpSyncServer;
+
+    public McpServerConfiguration(@org.springframework.context.annotation.Lazy McpSyncServer mcpSyncServer) {
+        this.mcpSyncServer = mcpSyncServer;
+    }
+
+    @EventListener(ApplicationReadyEvent.class)
+    void logActivatedTools() {
+        List<McpSchema.Tool> tools = mcpSyncServer.listTools();
+        StringBuilder sb = new StringBuilder();
+        sb.append("Activated MCP tools (").append(tools.size()).append("):");
+        int idx = 1;
+        for (McpSchema.Tool tool : tools) {
+            sb.append(String.format("%n  %2d. %s", idx++, tool.name()));
+        }
+        log.info(sb.toString());
+    }
 
     private static Map<String, Map<String, Object>> getLogProperties() {
         Map<String, Map<String, Object>> m = new LinkedHashMap<>();

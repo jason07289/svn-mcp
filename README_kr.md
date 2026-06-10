@@ -30,12 +30,59 @@
 | **Blame** | `blame_file` | `repository_id`, `path` | 줄 단위 blame; 선택: `revision`(annotate 상한, 생략 시 HEAD). |
 | **기간→리비전** | `resolve_revision_range` | `repository_id`, `start_inclusive`, `end_inclusive` | 시간 구간을 리비전 범위로 근사 매핑; 선택: `path`. |
 | **통계** | `repository_author_stats` | `repository_id` | 기간별 작성자 커밋·diff 라인 집계. 시간 창은 **`calendar_date`**(+선택 `timezone`) **또는** **`start_inclusive`·`end_inclusive`**(ISO-8601) 중 하나로 지정; 선택: `path_prefix`, `max_revisions_to_analyze`. |
+| **검색** | `search_in_path` | `repository_id`, `path`, `keyword` | 경로 하위 파일 내용에서 키워드(예: 테이블명)를 찾아 매칭 파일과 **마지막 작성자**를 반환. 모든 파일 읽기를 **단일 SVN 세션**으로 처리해 N+1 연결 비용을 회피. 선택: `revision`, `file_extensions`(쉼표 구분, 기본 `java`), `case_sensitive`(기본 false), `max_files_to_scan`(기본 200, 최대 500), `max_matches`(기본 50, 최대 200). |
 
-PRD·로드맵에만 있는 **`search`**, **`get_recent_activity`**, **`export_path`**, **`diff_paths`**, 선택 **`authz`** 등은 아직 MCP 도구로 노출되지 않습니다. 자격 증명은 서버 설정(env·시크릿)에만 두고 응답에 포함하지 않습니다.
+PRD·로드맵에만 있는 **`get_recent_activity`**, **`export_path`**, **`diff_paths`**, 선택 **`authz`** 등은 아직 MCP 도구로 노출되지 않습니다. 자격 증명은 서버 설정(env·시크릿)에만 두고 응답에 포함하지 않습니다.
 
 **포함:** MCP 프로토콜, Streamable HTTP, 위 읽기 중심 SVN 작업, 다중 저장소, 선택적 경로 권한.
 
 **제외·후순위:** WebSVN PHP UI 재현, **쓰기**(commit 등), 외부 공개 RSS 피드 호스팅(에이전트는 `get_recent_activity` 등으로 대체).
+
+---
+
+## `search_in_path` 사용법
+
+특정 테이블·키워드에 접근하는 파일을 찾고 **마지막 작업자**까지 한 번에 확인할 때 사용합니다. 내부적으로 경로 하위를 BFS로 훑은 뒤, 매칭된 파일마다 마지막 커밋 로그를 조회합니다. 이 모든 파일 I/O가 **하나의 SVN 세션** 안에서 수행되므로, `list_path` + `get_file`을 파일마다 호출하는 방식의 N+1 연결 비용이 발생하지 않습니다.
+
+### 파라미터
+
+| 파라미터 | 필수 | 기본값 | 설명 |
+|----------|------|--------|------|
+| `repository_id` | ✅ | — | 설정된 저장소 ID |
+| `path` | ✅ | — | 탐색 시작 경로 (예: `trunk/com/example/service`) |
+| `keyword` | ✅ | — | 파일 내용에서 찾을 키워드 (테이블명, SQL 조각 등) |
+| `revision` | — | HEAD | 조회할 리비전 |
+| `file_extensions` | — | `java` | 스캔 대상 확장자(쉼표 구분, 예: `java,xml`) |
+| `case_sensitive` | — | `false` | 대소문자 구분 여부 |
+| `max_files_to_scan` | — | `200` (최대 500) | 내용을 읽을 파일 수 상한 |
+| `max_matches` | — | `50` (최대 200) | 수집할 매칭 결과 수 상한 |
+
+### 응답 형태
+
+매칭된 파일마다 `modulePath`(상위 디렉터리), `filePath`(전체 경로), `fileName`, `lastAuthor`, `lastRevision`, `matchCount`(키워드 등장 라인 수), `matchedLines`(샘플 최대 5줄)를 반환합니다.
+
+### 권장 호출 패턴
+
+저장소 전체를 훑을 때는 `list_path`로 모듈 목록을 먼저 얻은 뒤, 모듈별로 `search_in_path`를 호출하면 진행 상황을 단계적으로 보여주고 에러도 모듈 단위로 격리됩니다.
+
+```text
+# 1) 모듈 목록
+list_path(repository_id="my-repo", path="trunk", view_mode="tree")
+
+# 2) 모듈별 검색 (MyBatis mapper까지 보려면 xml 포함)
+search_in_path(repository_id="my-repo", path="trunk/module-a", keyword="TB_ORDERS", file_extensions="java,xml")
+search_in_path(repository_id="my-repo", path="trunk/module-b", keyword="TB_ORDERS", file_extensions="java,xml")
+```
+
+LLM이 응답을 받아 다음과 같이 `모듈경로 | 파일 | 마지막작업자` 형식으로 정리할 수 있습니다.
+
+```text
+trunk/module-a/src/main/java/com/example/service | OrderService.java | dev_kim
+trunk/module-a/src/main/java/com/example/dao     | OrderDao.java     | dev_lee
+trunk/module-b/src/main/resources/mapper         | OrderMapper.xml   | dev_park
+```
+
+> 참고: `path="trunk"`처럼 넓은 범위를 한 번에 검색하면 BFS 깊이 기본값(6)과 `max_files_to_scan`(기본 200) 제한에 걸릴 수 있습니다. 규모가 크면 모듈 단위로 나눠 호출하거나 한도를 높이세요.
 
 ---
 
@@ -80,11 +127,11 @@ docker compose up --build
 
 - **MCP URL:** `http://localhost:8765/mcp`
 - 포트를 바꾸려면 `docker-compose.yml`의 `ports`를 `"원하는호스트포트:8765"`처럼 조정하고, 컨테이너 쪽 앱 포트는 `SERVER_PORT` 또는 `application.yml`로 맞춥니다.
-- **설정:** `src/main/resources/application.yml`, 프로퍼티 접두사 `io.github.jason07289.cicd.mcp`(YAML에서는 `io` → `github` → `jason07289` → … 중첩). 데모 자격 증명은 `SVN_DEMO_USER`, `SVN_DEMO_PASSWORD`로 덮어쓸 수 있습니다.
+- **설정:** `src/main/resources/application.yml`, 프로퍼티 접두사 `io.github.jason07289.svn.mcp`(YAML에서는 `io` → `github` → `jason07289` → … 중첩). 데모 자격 증명은 `SVN_DEMO_USER`, `SVN_DEMO_PASSWORD`로 덮어쓸 수 있습니다.
 - **현재 구현:** 상단 기능 요약 표에 나열한 MCP 도구(SVNKit 기반 읽기 전용).
 
 ---
 
 ## 패키지
 
-애플리케이션 기본 패키지: **`io.github.jason07289.cicd.mcp`**.
+애플리케이션 기본 패키지: **`io.github.jason07289.svn.mcp`**.

@@ -27,7 +27,7 @@ Capabilities are aligned with WebSVN-style flows and exposed as MCP **`tool`** c
 | **Revision** | `get_revision` — one revision’s metadata and changed paths (add/modify/delete). |
 | **Diff** | `diff_file` — compare two revisions of a file (e.g. unified diff); `ignore_whitespace` option. `diff_paths` — diff across paths/revisions. |
 | **Blame** | `blame_file` — per-line revision, author, and content. |
-| **Search** | `search` — query within repo/path/revision bounds with documented performance limits. |
+| **Search** | `search_in_path` — search file contents under a path for a keyword (e.g. a table name) and return matching files with their last author. All file reads share a single SVN session to avoid N+1 connection overhead. Required: `repository_id`, `path`, `keyword`; optional: `revision`, `file_extensions` (comma-separated, default `java`), `case_sensitive`, `max_files_to_scan`, `max_matches`. |
 | **Activity** | `get_recent_activity` — recent changes as JSON (RSS-style feed behavior without requiring public RSS hosting). |
 | **Export** | `export_path` — export archive or streaming download (with size/security policies). |
 | **Security** | Optional **`authz`**-based read guards on paths; credentials only on the server (env / secrets). |
@@ -81,11 +81,57 @@ docker compose up --build
 - Host and container both listen on **8765** (`docker-compose.yml` `ports` and `SERVER_PORT`).
 
 To use another host port, change `ports` to e.g. `"9000:8765"` and keep the container app on **8765** unless you also override `SERVER_PORT` / `application.yml`.
-- **Configuration:** `src/main/resources/application.yml`, prefix `io.github.jason07289.cicd.mcp` (nested under `io.github.jason07289.cicd.mcp` in YAML). Demo credentials can be overridden with `SVN_DEMO_USER` and `SVN_DEMO_PASSWORD`.
-- **Implemented today (MVP tools):** `list_repositories` (config only), `list_path`, `get_file`, `get_log`, `get_revision`, `diff_file`, `blame_file` (SVNKit against each repo `root_url`; credentials stay server-side and are never returned in tool output).
+- **Configuration:** `src/main/resources/application.yml`, prefix `io.github.jason07289.svn.mcp` (nested under `io.github.jason07289.svn.mcp` in YAML). Demo credentials can be overridden with `SVN_DEMO_USER` and `SVN_DEMO_PASSWORD`.
+- **Implemented today:** `list_repositories` (config only), `list_path`, `get_file`, `get_log`, `get_revision`, `diff_file`, `diff_revision`, `blame_file`, `resolve_revision_range`, `repository_author_stats`, `search_in_path` (SVNKit against each repo `root_url`; credentials stay server-side and are never returned in tool output).
+
+---
+
+## Using `search_in_path`
+
+Use this to find which files reference a given table/keyword and who last touched each one. It walks the files under `path` (BFS), then looks up the last commit for each matching file. All of this file I/O happens inside a **single SVN session**, so it avoids the N+1 connection cost of calling `list_path` + `get_file` per file.
+
+### Parameters
+
+| Parameter | Required | Default | Description |
+|-----------|----------|---------|-------------|
+| `repository_id` | yes | — | Configured repository id |
+| `path` | yes | — | Base path to search under (e.g. `trunk/com/example/service`) |
+| `keyword` | yes | — | Keyword to find in file contents (table name, SQL fragment, …) |
+| `revision` | no | HEAD | Revision to read |
+| `file_extensions` | no | `java` | Comma-separated extensions to scan (e.g. `java,xml`) |
+| `case_sensitive` | no | `false` | Case-sensitive matching |
+| `max_files_to_scan` | no | `200` (max 500) | Cap on files whose content is read |
+| `max_matches` | no | `50` (max 200) | Stop after this many matches |
+
+### Response
+
+Each match returns `modulePath`, `filePath`, `fileName`, `lastAuthor`, `lastRevision`, `matchCount` (lines containing the keyword), and `matchedLines` (up to 5 sample lines).
+
+### Recommended pattern
+
+To sweep an entire repo, list modules first with `list_path`, then call `search_in_path` per module so progress is incremental and errors are isolated per module.
+
+```text
+# 1) list modules
+list_path(repository_id="my-repo", path="trunk", view_mode="tree")
+
+# 2) search per module (include xml to catch MyBatis mappers)
+search_in_path(repository_id="my-repo", path="trunk/module-a", keyword="TB_ORDERS", file_extensions="java,xml")
+search_in_path(repository_id="my-repo", path="trunk/module-b", keyword="TB_ORDERS", file_extensions="java,xml")
+```
+
+The LLM can then format the results as `modulePath | file | lastAuthor`:
+
+```text
+trunk/module-a/src/main/java/com/example/service | OrderService.java | dev_kim
+trunk/module-a/src/main/java/com/example/dao     | OrderDao.java     | dev_lee
+trunk/module-b/src/main/resources/mapper         | OrderMapper.xml   | dev_park
+```
+
+> Note: searching a wide scope like `path="trunk"` in one call may hit the default BFS depth (6) and `max_files_to_scan` (200) limits. For large trees, split calls per module or raise the limits.
 
 ---
 
 ## Package name
 
-Application base package: **`io.github.jason07289.cicd.mcp`**.
+Application base package: **`io.github.jason07289.svn.mcp`**.
