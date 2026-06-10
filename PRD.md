@@ -86,7 +86,7 @@ MCP `tool` 이름은 **snake_case**로 일관되게 정한다.
 |------|------|
 | **전송** | Spring Boot + MCP Java SDK, **Streamable HTTP**, 엔드포인트 경로 `/mcp`(기본값). |
 | **SVN 접근** | **SVNKit** (`SvnRepositoryOperations` / `SvnKitRepositoryOperations`). 클라이언트·IDE에 `svn` CLI 불필요. |
-| **설정** | `application.yml` 프리픽스 `io.github.jason07289.cicd.mcp` — 저장소 목록, `authz_file`, `defaults`(로그 한도·파일 최대 바이트·통계용 리비전 상한). `authz_file`은 프로퍼티만 존재하며 **경로별 읽기 가드는 아직 미구현**. |
+| **설정** | `application.yml` 프리픽스 `io.github.jason07289.svn.mcp` — 저장소 목록, `authz_file`, `defaults`(로그 한도·파일 최대 바이트·통계용 리비전 상한). `authz_file`은 프로퍼티만 존재하며 **경로별 읽기 가드는 아직 미구현**. |
 
 **등록된 MCP 도구(구현됨)**
 
@@ -146,7 +146,7 @@ MCP `tool` 이름은 **snake_case**로 일관되게 정한다.
 io:
   github:
     jason07289:
-      cicd:
+      svn:
         mcp:
           repositories:
             - id: myproj

@@ -72,7 +72,7 @@
 
 ## 한계와 운영
 
-서버 기본값은 `src/main/resources/application.yml`의 `io.github.jason07289.cicd.mcp.defaults`를 따른다.
+서버 기본값은 `src/main/resources/application.yml`의 `io.github.jason07289.svn.mcp.defaults`를 따른다.
 
 | 설정 / 동작 | 기본값(예) | 영향 |
 |-------------|------------|------|

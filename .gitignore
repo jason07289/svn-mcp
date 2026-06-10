@@ -15,7 +15,7 @@ out/
 .omc/
 
 # Local bundle artifacts
-cicd-mcp.tar
-cicd-mcp-*.tar
-k8s_cicd_mcp.zip
+svn-mcp.tar
+svn-mcp-*.tar
+k8s_svn_mcp.zip
 bin/

@@ -1,4 +1,4 @@
-# Architecture: io.github.jason07289.cicd.mcp
+# Architecture: io.github.jason07289.svn.mcp
 
 본 문서는 코드베이스의 **패키지 루트·계층 분리·의존 규칙**을 정의한다. 구현 세부(클래스명·엔드포인트 경로)는 진행에 따라 조정할 수 있으나, **SVN 연동**과 **MCP(Streamable HTTP) 연동**의 패키지 경계는 유지하는 것을 원칙으로 한다.
 
@@ -9,10 +9,10 @@
 모든 애플리케이션 코드의 기본 네임스페이스는 다음과 같다.
 
 ```text
-io.github.jason07289.cicd.mcp
+io.github.jason07289.svn.mcp
 ```
 
-루트가 이미 `…mcp`로 끝나므로, 하위에 **`io.github.jason07289.cicd.mcp.mcp`** 와 같이 `mcp`를 한 번 더 두지 않는다. MCP 전송·tool 계층은 **`transport`**, **`tool`**(및 필요 시 **`protocol`**) 등으로 나눈다.
+루트가 이미 `…mcp`로 끝나므로, 하위에 **`io.github.jason07289.svn.mcp.mcp`** 와 같이 `mcp`를 한 번 더 두지 않는다. MCP 전송·tool 계층은 **`transport`**, **`tool`**(및 필요 시 **`protocol`**) 등으로 나눈다.
 
 ---
 
@@ -20,16 +20,16 @@ io.github.jason07289.cicd.mcp
 
 | 영역 | 패키지 | 책임 |
 |------|--------|------|
-| 애플리케이션 부트스트랩 | `io.github.jason07289.cicd.mcp` | `@SpringBootApplication`, `main` |
-| 설정 | `io.github.jason07289.cicd.mcp.config` | Spring `@Configuration`, `@ConfigurationProperties`, 프로파일 |
-| **SVN 실제 연동** | `io.github.jason07289.cicd.mcp.svn` | SVNKit 기반 저장소 접근, 인증·연결, 도메인/유스케이스에 맞는 API |
-| **MCP 연동** | `io.github.jason07289.cicd.mcp.transport`, `io.github.jason07289.cicd.mcp.tool` | Streamable HTTP, MCP 세션/전송, tool 등록·호출 라우팅 |
+| 애플리케이션 부트스트랩 | `io.github.jason07289.svn.mcp` | `@SpringBootApplication`, `main` |
+| 설정 | `io.github.jason07289.svn.mcp.config` | Spring `@Configuration`, `@ConfigurationProperties`, 프로파일 |
+| **SVN 실제 연동** | `io.github.jason07289.svn.mcp.svn` | SVNKit 기반 저장소 접근, 인증·연결, 도메인/유스케이스에 맞는 API |
+| **MCP 연동** | `io.github.jason07289.svn.mcp.transport`, `io.github.jason07289.svn.mcp.tool` | Streamable HTTP, MCP 세션/전송, tool 등록·호출 라우팅 |
 
 선택적으로 공통 타입만 분리할 때는 아래를 둘 수 있다(필요 시 도입).
 
 | 영역 | 패키지 | 책임 |
 |------|--------|------|
-| 공통 | `io.github.jason07289.cicd.mcp.common` | 여러 계층에서 쓰는 예외·유틸·소량 공유 타입(과도한 “공통” 축적은 지양) |
+| 공통 | `io.github.jason07289.svn.mcp.common` | 여러 계층에서 쓰는 예외·유틸·소량 공유 타입(과도한 “공통” 축적은 지양) |
 
 ---
 
@@ -38,8 +38,8 @@ io.github.jason07289.cicd.mcp
 의미 단위로 하위 패키지를 나눈다. 이름은 구현 시 클래스 배치에 맞게 미세 조정 가능하다.
 
 ```text
-io.github.jason07289.cicd.mcp
-├── CicdMcpApplication.java           # Spring Boot 진입점
+io.github.jason07289.svn.mcp
+├── SvnMcpApplication.java           # Spring Boot 진입점
 │
 ├── config
 │   ├── …                             # 빈 조립, Properties, 보안·타임아웃 등
@@ -60,18 +60,18 @@ io.github.jason07289.cicd.mcp
     └── …
 ```
 
-### 3.1 `io.github.jason07289.cicd.mcp.svn` (SVN 실제 연동)
+### 3.1 `io.github.jason07289.svn.mcp.svn` (SVN 실제 연동)
 
 - **역할**: SVN 서버와의 통신, 인증, 리비전·경로·로그·diff·blame 등 **저장소 작업의 실체**.
 - **기술**: SVNKit을 **이 패키지 트리 안**에서 캡슐화한다(특히 `svn.svnkit`).
 - **대외 계약**: `svn.api`에 두는 인터페이스는 **MCP에 특화되지 않게** 유지한다. 동일 API를 나중에 REST·배치 등이 재사용할 수 있게 한다.
 
-### 3.2 `io.github.jason07289.cicd.mcp.transport` · `io.github.jason07289.cicd.mcp.tool` (MCP 연동)
+### 3.2 `io.github.jason07289.svn.mcp.transport` · `io.github.jason07289.svn.mcp.tool` (MCP 연동)
 
 - **역할**: AI 도구와의 **Streamable HTTP** MCP 전송, tool 목록·호출 처리.
-- **경계**: 저장소 I/O는 직접 하지 않고, **`io.github.jason07289.cicd.mcp.svn.api`** 를 호출한다.
+- **경계**: 저장소 I/O는 직접 하지 않고, **`io.github.jason07289.svn.mcp.svn.api`** 를 호출한다.
 
-### 3.3 `io.github.jason07289.cicd.mcp` · `io.github.jason07289.cicd.mcp.config`
+### 3.3 `io.github.jason07289.svn.mcp` · `io.github.jason07289.svn.mcp.config`
 
 - **역할**: 애플리케이션 기동, 전역 설정, 빈 등록(필요 시 `svn` 구현체를 `api`에 연결).
 - **저장소·SVN 서버 설정**: 루트 URL·계정 등 **SVN 접속에 필요한 기본 정보**는 Spring Boot **`application.yml`**(프로파일·환경 변수 포함) 등 외부 설정으로 두고, `@ConfigurationProperties` 등으로 이 패키지에서 바인딩한다. 필드·키 정의는 [PRD.md](./PRD.md)의 설정 모델과 맞춘다.
@@ -85,23 +85,23 @@ io.github.jason07289.cicd.mcp
 
 | 모듈 | 포함 패키지 (예시) |
 |------|---------------------|
-| `cicd-mcp-svn` | `io.github.jason07289.cicd.mcp.svn` |
-| `cicd-mcp-mcp` | `io.github.jason07289.cicd.mcp.transport`, `io.github.jason07289.cicd.mcp.tool`, (선택) `io.github.jason07289.cicd.mcp.protocol` |
-| `cicd-mcp-app` | `io.github.jason07289.cicd.mcp`, `io.github.jason07289.cicd.mcp.config` + Spring Boot 플러그인 |
+| `svn-mcp-svn` | `io.github.jason07289.svn.mcp.svn` |
+| `svn-mcp-mcp` | `io.github.jason07289.svn.mcp.transport`, `io.github.jason07289.svn.mcp.tool`, (선택) `io.github.jason07289.svn.mcp.protocol` |
+| `svn-mcp-app` | `io.github.jason07289.svn.mcp`, `io.github.jason07289.svn.mcp.config` + Spring Boot 플러그인 |
 
-의존 방향: **`app` → `cicd-mcp-mcp`, `cicd-mcp-svn`**, **`transport`/`tool` → `svn`(api 중심)**. `svn`은 `transport`·`tool`을 **참조하지 않는다.**
+의존 방향: **`app` → `svn-mcp-mcp`, `svn-mcp-svn`**, **`transport`/`tool` → `svn`(api 중심)**. `svn`은 `transport`·`tool`을 **참조하지 않는다.**
 
 ---
 
 ## 5. 의존 규칙 (필수)
 
-1. **`io.github.jason07289.cicd.mcp.transport` / `io.github.jason07289.cicd.mcp.tool` → `io.github.jason07289.cicd.mcp.svn.api` (및 필요 시 `svn.model`)**  
+1. **`io.github.jason07289.svn.mcp.transport` / `io.github.jason07289.svn.mcp.tool` → `io.github.jason07289.svn.mcp.svn.api` (및 필요 시 `svn.model`)**  
    MCP 계층은 SVN 구현 세부(SVNKit 타입)에 직접 의존하지 않는 것을 권장한다.
 
-2. **`io.github.jason07289.cicd.mcp.svn.svnkit` → SVNKit**  
+2. **`io.github.jason07289.svn.mcp.svn.svnkit` → SVNKit**  
    SVNKit 타입은 가능한 한 `svnkit` 패키지 내부로 가둔다.
 
-3. **`io.github.jason07289.cicd.mcp.svn` ↛ `io.github.jason07289.cicd.mcp.transport` · `io.github.jason07289.cicd.mcp.tool`**  
+3. **`io.github.jason07289.svn.mcp.svn` ↛ `io.github.jason07289.svn.mcp.transport` · `io.github.jason07289.svn.mcp.tool`**  
    SVN 계층은 MCP·HTTP에 대해 알지 않는다.
 
 4. **`config`**  
@@ -115,4 +115,4 @@ io.github.jason07289.cicd.mcp
 
 ---
 
-*문서 버전: 1.2 — 패키지 루트 `io.github.jason07289.cicd.mcp`, `svn` / `transport`·`tool` 분리; `config` ↔ `application.yml` 저장소 바인딩*
+*문서 버전: 1.2 — 패키지 루트 `io.github.jason07289.svn.mcp`, `svn` / `transport`·`tool` 분리; `config` ↔ `application.yml` 저장소 바인딩*

@@ -18,7 +18,7 @@ spec:
     spec:
       containers:
         - name: svn-mcp
-          image: cicd-mcp:0.1.0
+          image: svn-mcp:0.1.0
           imagePullPolicy: IfNotPresent
           ports:
             - name: http

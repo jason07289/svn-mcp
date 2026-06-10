@@ -1,11 +1,11 @@
 services:
-  cicd-mcp:
-    image: cicd-mcp:latest
+  svn-mcp:
+    image: svn-mcp:latest
     build:
       context: .
       # Default: host-built JAR (no Gradle download inside Docker — avoids disk issues).
-      # All-in-Docker build: CICD_MCP_DOCKERFILE=docker/Dockerfile docker compose build
-      dockerfile: ${CICD_MCP_DOCKERFILE:-docker/Dockerfile.packaged}
+      # All-in-Docker build: SVN_MCP_DOCKERFILE=docker/Dockerfile docker compose build
+      dockerfile: ${SVN_MCP_DOCKERFILE:-docker/Dockerfile.packaged}
     ports:
       - "8765:8765"
     environment:

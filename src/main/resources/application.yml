@@ -3,12 +3,12 @@ server:
 
 spring:
   application:
-    name: cicd-mcp
+    name: svn-mcp
 
 io:
   github:
     jason07289:
-      cicd:
+      svn:
         mcp:
           repositories:
             - id: test-repo
