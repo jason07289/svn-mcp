@@ -53,6 +53,14 @@ public class SvnKitRepositoryOperations implements SvnRepositoryOperations {
     private static final int DEFAULT_FLAT_MAX_DEPTH = 6;
     private static final int DEFAULT_FLAT_MAX_ENTRIES = 2000;
 
+    /**
+     * Content search must descend through deep package/resource trees (e.g.
+     * {@code trunk/src/main/resources/<group>/<module>/.../mapper}), so it uses a much larger
+     * depth than the default flat listing limit. Otherwise deeply nested files (mappers, DTOs)
+     * are silently excluded from the scan.
+     */
+    private static final int SEARCH_FLAT_MAX_DEPTH = 25;
+
     private final RepositoryEntryResolver resolver;
     private final SvnMcpProperties properties;
 
@@ -523,7 +531,7 @@ public class SvnKitRepositoryOperations implements SvnRepositoryOperations {
             long rev = resolveRevision(repo, revision);
 
             List<PathEntry> allFiles =
-                    listFlat(repo, normalized, rev, DEFAULT_FLAT_MAX_DEPTH, maxFilesToScan * 2);
+                    listFlat(repo, normalized, rev, SEARCH_FLAT_MAX_DEPTH, DEFAULT_FLAT_MAX_ENTRIES);
 
             List<PathEntry> candidates =
                     allFiles.stream()
